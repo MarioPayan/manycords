@@ -49,6 +49,29 @@ const feedDB = (() => {
       for (const channel of channels) tx.objectStore('channels').put(channel);
     }),
     event: (event) => transaction(['events'], 'readwrite', (tx) => tx.objectStore('events').add(event)),
+    // Preserve auto-increment event keys while updating passive coverage in place.
+    coverGaps: (runs) => transaction(['events'], 'readwrite', (tx, done) => {
+      let count = 0;
+      done(0);
+      scan(tx.objectStore('events'), null, 'next', (event, cursor) => {
+        if (event.type !== 'gap') return;
+        const updated = coverGap(event, runs);
+        if (JSON.stringify(updated.covered) === JSON.stringify(event.covered ?? {})) return;
+        tx.objectStore('events').put(updated, cursor.primaryKey);
+        done(++count);
+      });
+    }),
+    prune: (retentionDays = 14, now = Date.now()) => transaction(['messages', 'events'], 'readwrite', (tx, done) => {
+      const counts = { messages: 0, events: 0 };
+      done(counts);
+      // Exclusive upper bounds: records exactly at the cutoff survive.
+      if (retentionDays > 0) scan(tx.objectStore('messages').index('captured_at'),
+        IDBKeyRange.bound(0, now - retentionDays * 864e5, false, true), 'next', (_value, cursor) => {
+          cursor.delete(); counts.messages++;
+        });
+      scan(tx.objectStore('events').index('at'), IDBKeyRange.bound(0, now - 30 * 864e5, false, true),
+        'next', (_value, cursor) => { cursor.delete(); counts.events++; });
+    }),
     events: (since) => transaction(['events'], 'readonly', (tx, done) => {
       tx.objectStore('events').index('at').getAll(IDBKeyRange.lowerBound(since)).onsuccess = (event) => done(event.target.result);
     }),
@@ -59,6 +82,11 @@ const feedDB = (() => {
           if (old) messages.put({ ...old, deleted_at: deletedAt }); // keep the text
           done(!!old);
         } else {
+          // A history page can contain the original version of an already edited row.
+          if (old?.edited_timestamp && (message.source === 'history' || message.edited_timestamp !== undefined)
+            && Date.parse(old.edited_timestamp) > (Date.parse(message.edited_timestamp) || 0)) {
+            done(false); return;
+          }
           const defined = (value) => Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
           const value = { ...old, ...defined(message), captured_at: old?.captured_at ?? Date.now() };
           // Numeric index key preserves exact unread boundaries without changing Discord's timestamp text.

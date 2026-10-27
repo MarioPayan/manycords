@@ -30,11 +30,12 @@ const db = vm.runInContext('feedDB', bg);
 await vm.runInContext('queue', bg);
 assert.ok(!data['m:old'], 'schema change wipes old data');
 assert.equal(data.collections[0].all, true, 'demo collection "All" created');
+data.consentedAt = Date.now(); // capture is gated on the welcome screen's consent
 
 const page = vm.createContext({
   location: { origin: 'https://discord.com' },
   console,
-  window: { postMessage: (m) => onMessage({ kind: m.kind, data: m.data }) },
+  window: { postMessage: (m) => onMessage({ kind: m.kind, data: m.data }, { tab: { id: 1 } }) }, // one Discord tab = the leader
 });
 vm.runInContext(readFileSync('hook.js', 'utf8'), page);
 const frame = (o) => vm.runInContext(`JSON.parse(${JSON.stringify(JSON.stringify(o))})`, page);

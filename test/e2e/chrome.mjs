@@ -14,6 +14,11 @@ try {
   let [worker] = context.serviceWorkers();
   worker ??= await context.waitForEvent('serviceworker', { timeout: 15000 });
   const id = new URL(worker.url()).host;
+  // capture is gated on consent: wait for the schema init, then consent as the welcome screen would
+  await worker.evaluate(async () => {
+    while (!(await chrome.storage.local.get('schema')).schema) await new Promise((r) => setTimeout(r, 50));
+    await chrome.storage.local.set({ consentedAt: Date.now() });
+  });
   const errors = [];
   worker.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   const page = await context.newPage();
@@ -28,6 +33,8 @@ try {
     ] }] } },
     { op: 0, s: 2, t: 'MESSAGE_CREATE', d: { id: '100', channel_id: 'c1', guild_id: 'g1', content: 'Patch 2.3 tomorrow', timestamp, author: { id: 'u1', username: 'Leo' } } },
     { op: 0, s: 3, t: 'MESSAGE_CREATE', d: { id: '101', channel_id: 'c2', guild_id: 'g1', content: 'Hello from the gateway', timestamp, author: { id: 'u2', username: 'Ana' } } },
+    // an HTTP history page (what Discord loads when the user scrolls up): an array of messages without guild_id
+    [{ id: '090', channel_id: 'c2', content: 'Older message from history', timestamp: new Date(Date.now() - 3600e3).toISOString(), author: { id: 'u3', username: 'Mo' } }],
   ];
   await page.route('https://discord.com/**', (route) => route.fulfill({
     contentType: 'text/html; charset=utf-8',
@@ -38,7 +45,10 @@ try {
   const viewer = await context.newPage();
   viewer.on('pageerror', (error) => errors.push(error.message));
   await viewer.goto(`chrome-extension://${id}/viewer.html`);
-  await viewer.waitForFunction(async () => (await feedDB.recent({ all: true }, {}, 10)).length === 2);
+  await viewer.waitForFunction(async () => (await feedDB.recent({ all: true }, {}, 10)).length === 3);
+  const history = await viewer.evaluate(async () => feedDB.get('messages', '090'));
+  assert.equal(history.source, 'history', 'history pages are captured passively');
+  assert.equal(history.guild_id, 'g1', 'history rows get guild_id from the stored channel');
   await viewer.locator('.entry .txt').filter({ hasText: 'Patch 2.3 tomorrow' }).waitFor();
   await viewer.locator('.entry .txt').filter({ hasText: 'Hello from the gateway' }).waitFor();
   // rev is debounced (500 ms) after writes: wait for it rather than racing it
@@ -60,7 +70,7 @@ try {
   });
   await viewer.locator('.entry.deleted .txt').filter({ hasText: 'Patch edited' }).waitFor();
   assert.equal(await viewer.evaluate(async () => (await feedDB.get('messages', '100')).author.name), 'Leo');
-  assert.equal(await viewer.locator('.entry').count(), 2);
+  assert.equal(await viewer.locator('.entry').count(), 3); // two gateway messages + one history message
   assert.deepEqual(errors, []);
   if (process.argv[2]) await viewer.screenshot({ path: resolve(process.argv[2]), fullPage: true });
   console.log('Chrome gateway → IndexedDB → viewer passed');

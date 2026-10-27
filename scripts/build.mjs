@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const manifest = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
-const files = ['hook.js', 'relay.js', 'background.js', 'db.js', 'threads.js', 'viewer.html', 'viewer.js', '_locales', 'fonts'];
+const files = ['hook.js', 'relay.js', 'background.js', 'db.js', 'gaps.js', 'threads.js', 'viewer.html', 'viewer.js', '_locales', 'fonts'];
 const hasZip = !spawnSync('zip', ['-v'], { stdio: 'ignore' }).error;
 for (const browser of ['chrome', 'firefox']) {
   const destination = resolve(root, 'dist', browser);

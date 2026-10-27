@@ -394,12 +394,119 @@
     "message": "Borrar todos los mensajes"
   },
   "appName": {
-    "message": "Discord Feed"
+    "message": "ManyCords"
   },
   "appDescription": {
     "message": "Guarda mensajes de los canales de servidores elegidos mientras una pestaña de Discord está abierta."
   },
   "allCollection": {
     "message": "Todo"
+  },
+  "focusChannel": {
+    "message": "Ver solo este canal"
+  },
+  "messageFeed": {
+    "message": "Mensajes"
+  },
+  "earlierRead": {
+    "message": "$COUNT$ mensajes anteriores ya leídos",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "revealSpoiler": {
+    "message": "Mostrar spoiler"
+  },
+  "healthOk": {
+    "message": "La captura funciona. Mantén abierta tu pestaña de Discord."
+  },
+  "healthNoTab": {
+    "message": "Ninguna pestaña de Discord está recibiendo mensajes. Abre discord.com para continuar."
+  },
+  "healthBroken": {
+    "message": "Discord ha cambiado y la captura se ha detenido. Actualiza la extensión y recarga Discord."
+  },
+  "healthMultiTab": {
+    "message": "Hay varias pestañas de Discord abiertas. Deja una abierta y cierra las demás."
+  },
+  "healthNotConsented": {
+    "message": "La captura está en pausa hasta que aceptes el aviso de bienvenida. Abre la bienvenida para continuar."
+  },
+  "coverageGaps": {
+    "message": "Huecos de captura"
+  },
+  "gapCovered": {
+    "message": "Recuperado"
+  },
+  "recover": {
+    "message": "Recuperar"
+  },
+  "recoveryHint": {
+    "message": "Abre el canal en el punto del hueco y desplázate hacia arriba hasta que la marca del hueco se ponga verde."
+  },
+  "recoveryUnavailable": {
+    "message": "Los enlaces de recuperación aún no están disponibles. Actualiza la extensión y elige canales en una colección."
+  },
+  "welcome": {
+    "message": "Bienvenida"
+  },
+  "welcomeCapture": {
+    "message": "Este lector guarda únicamente los mensajes que recibe tu propia pestaña de Discord, y solo de los canales de tus colecciones. No descarga el historial de los canales."
+  },
+  "welcomeLocal": {
+    "message": "Todos los mensajes y ajustes se quedan en este dispositivo. Solo se contacta con la CDN de imágenes de Discord para cargar avatares, iconos de servidores y miniaturas. Los enlaces se abren cuando tú los eliges."
+  },
+  "welcomeRisk": {
+    "message": "Las condiciones de Discord no autorizan este tipo de herramienta. Al continuar, aceptas el riesgo de usarla."
+  },
+  "understand": {
+    "message": "Entiendo y acepto"
+  },
+  "guidedSteps": {
+    "message": "Empieza en tres pasos"
+  },
+  "openDiscordStep": {
+    "message": "Abre discord.com"
+  },
+  "waitSignal": {
+    "message": "Espera la señal verde: mantén Discord abierto mientras recibe mensajes."
+  },
+  "greenSignal": {
+    "message": "Señal verde: la captura funciona."
+  },
+  "createFirstCollection": {
+    "message": "Crea tu primera colección"
+  },
+  "shortcuts": {
+    "message": "Atajos de teclado"
+  },
+  "shortcutMove": {
+    "message": "Mensaje siguiente / anterior"
+  },
+  "shortcutUnread": {
+    "message": "Siguiente mensaje sin leer"
+  },
+  "retention": {
+    "message": "Conservar mensajes"
+  },
+  "retention7": {
+    "message": "7 días"
+  },
+  "retention14": {
+    "message": "14 días"
+  },
+  "retention30": {
+    "message": "30 días"
+  },
+  "retentionForever": {
+    "message": "Siempre"
+  },
+  "exportCollection": {
+    "message": "Exportar esta colección (JSON)"
+  },
+  "exportEverything": {
+    "message": "Exportar todo (JSON)"
   }
 }

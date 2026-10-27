@@ -5,22 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="appName"></title>
   <style>
-    /* Ported from design/prototype.html. Reader layout: sidebar (collections, sources, listening) | river with conversation lanes. */
+    /* Ported from design/prototype.html. Reader layout: sidebar (collections, sources, listening) | river with channel lanes. */
     @font-face { font-family: "Geist"; src: url(fonts/geist.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
     @font-face { font-family: "Geist Mono"; src: url(fonts/geist-mono.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
     :root {
-      --bg: #f5f6f8; --side: #eef0f3; --surface: #ffffff; --sunk: #e8ebf0; --ink: #14161b; --soft: #5b606d; --faint: #9095a3; --line: #e0e3e9;
-      --hover: #e6e9ee; --signal: #6b5cff; --signal-ink: #ffffff; --unread: #ff5d3a; --ok: #12a26b; --scrim: rgba(20,22,27,.45);
-      --l0: #6b5cff; --l1: #e8590c; --l2: #0ca678; --l3: #d6336c; --l4: #1c7ed6; --l5: #ae3ec9;
+      --bg: #f5f6f8; --side: #eef0f3; --surface: #ffffff; --sunk: #e8ebf0; --ink: #14161b; --soft: #515765; --faint: #626875; --line: #e0e3e9;
+      --hover: #e6e9ee; --signal: #5946d2; --signal-ink: #ffffff; --unread: #a12e18; --ok: #066738; --scrim: rgba(20,22,27,.45);
+      --l0: #5946d2; --l1: #a33c06; --l2: #066246; --l3: #aa2352; --l4: #155b9e; --l5: #892eaa;
       --sans: "Geist", "Segoe UI", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
     }
     @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-      --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #23262e;
+      --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #afb5c2; --faint: #a0a6b5; --line: #23262e;
       --hover: #1c1f26; --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97; --scrim: rgba(0,0,0,.6);
       --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; --l4: #4dabf7; --l5: #da77f2; color-scheme: dark;
     } }
     :root[data-theme="dark"] {
-      --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #23262e;
+      --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #afb5c2; --faint: #a0a6b5; --line: #23262e;
       --hover: #1c1f26; --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97; --scrim: rgba(0,0,0,.6);
       --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; --l4: #4dabf7; --l5: #da77f2; color-scheme: dark;
     }
@@ -197,6 +197,55 @@
     .sh-foot { padding: 14px 24px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; background: var(--bg); }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 500; z-index: 40; animation: fade .15s ease; }
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+    .scroll { overflow-anchor: none; }
+    .river { max-width: 100%; }
+    .earlier { display: block; margin: 4px 0 8px var(--gut); }
+    .entry:focus-within .tools { display: flex; }
+    .entry .txt a, .status a, .overlay-card a { color: var(--signal); }
+    .entry .txt pre { max-width: 100%; overflow-x: auto; padding: 12px; background: var(--sunk); border-radius: 8px; white-space: pre; }
+    .entry .txt code { font-family: var(--mono); background: var(--sunk); border-radius: 4px; }
+    .entry .txt blockquote { border-left: 3px solid var(--soft); margin: 4px 0; padding-left: 12px; color: var(--soft); }
+    .spoiler { color: transparent; background: var(--soft); border-radius: 4px; text-align: left; }
+    .spoiler:not(.revealed) * { color: transparent !important; visibility: hidden; }
+    .spoiler.revealed { color: var(--ink); background: var(--sunk); }
+    .thumbnail { max-width: 320px; max-height: 240px; width: auto; height: auto; object-fit: contain; border-radius: 8px; display: block; }
+    .image-attachment { display: block; margin-top: 8px; max-width: 100%; }
+    .image-attachment img { max-width: min(320px, 100%); }
+    .file { color: var(--ink); text-decoration: none; }
+    .health-copy { font-size: 12px; margin: 0; color: var(--soft); }
+    .status { max-height: 48vh; overflow-y: auto; }
+    .gap-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--unread); }
+    .covered { color: var(--ok); }
+    .spark i.covered { background: var(--ok); }
+    .graph .reply-arc { stroke-width: 1; stroke-dasharray: 2 3; }
+    .fav, .entry .av { color: var(--bg); background: var(--ink); }
+    .switch { box-shadow: inset 0 0 0 1px var(--soft); }
+    .switch::after { background: var(--soft); }
+    .switch.on::after, .switch.part::after { background: var(--signal-ink); }
+    .pill .nw { background: var(--ink); color: var(--bg); }
+    .overlay { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: var(--scrim); padding: 20px; }
+    .overlay-card { background: var(--bg); border: 1px solid var(--line); border-radius: 18px; padding: 28px; width: min(560px, 100%); max-height: 90vh; overflow-y: auto; }
+    .overlay-card h2 { margin-top: 0; }
+    .overlay-card p, .overlay-card li { color: var(--soft); }
+    .overlay-card li { margin-bottom: 14px; }
+    .overlay-card dl { display: grid; grid-template-columns: 70px 1fr; gap: 10px; }
+    .overlay-card dt { font-family: var(--mono); }
+    .overlay-card dd { margin: 0; color: var(--soft); }
+    #mobilemenu { display: none; }
+    @media (max-width: 760px) {
+      .head { padding: 14px 12px; }
+      .titlerow { flex-wrap: wrap; gap: 5px; }
+      .titlerow h1 { font-size: 23px; max-width: calc(100% - 140px); }
+      .titlerow .search { flex-basis: 100%; order: 2; width: 100%; }
+      .river { margin-left: 0; padding-right: 6px; }
+      .entry { gap: 8px; padding-right: 6px; }
+      #mobilemenu { display: grid; }
+      .menu { position: fixed; left: auto; right: 12px; top: 60px; width: min(330px, calc(100vw - 24px)); }
+      .side:has(.menu:not([hidden])) { display: contents !important; }
+      .side:has(.menu:not([hidden])) > :not(.brand), .side:has(.menu:not([hidden])) .brand > :not(.menu) { display: none; }
+      .side:has(.menu:not([hidden])) .brand { display: contents; }
+    }
   </style>
 </head>
 <body>
@@ -208,6 +257,11 @@
         <button class="iconbtn" id="menubtn" data-i18n-aria-label="settings" data-i18n-title="settings" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
         <div class="menu" id="menu" hidden>
           <label><span data-i18n="theme"></span> <select id="theme"><option value="system" data-i18n="systemTheme"></option><option value="light" data-i18n="lightTheme"></option><option value="dark" data-i18n="darkTheme"></option></select></label>
+          <label><span data-i18n="retention"></span> <select id="retention"><option value="7" data-i18n="retention7"></option><option value="14" data-i18n="retention14"></option><option value="30" data-i18n="retention30"></option><option value="0" data-i18n="retentionForever"></option></select></label>
+          <button id="export-current" data-i18n="exportCollection"></button>
+          <button id="export-all" data-i18n="exportEverything"></button>
+          <button id="welcome" data-i18n="welcome"></button>
+          <button id="shortcuts" data-i18n="shortcuts"></button>
           <hr>
           <button id="clean" data-i18n="cleanMessages"></button>
           <button id="wipe" class="danger" data-i18n="wipeMessages"></button>
@@ -223,6 +277,7 @@
   </div>
   <script src="db.js"></script>
   <script src="threads.js"></script>
+  <script src="gaps.js"></script>
   <script src="viewer.js"></script>
 </body>
 </html>

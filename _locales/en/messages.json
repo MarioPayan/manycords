@@ -394,12 +394,119 @@
     "message": "Delete all messages"
   },
   "appName": {
-    "message": "Discord Feed"
+    "message": "ManyCords"
   },
   "appDescription": {
     "message": "Passively saves messages from selected server channels while a Discord tab is open."
   },
   "allCollection": {
     "message": "All"
+  },
+  "focusChannel": {
+    "message": "Show only this channel"
+  },
+  "messageFeed": {
+    "message": "Messages"
+  },
+  "earlierRead": {
+    "message": "$COUNT$ earlier read messages",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "revealSpoiler": {
+    "message": "Reveal spoiler"
+  },
+  "healthOk": {
+    "message": "Capture is working. Keep your Discord tab open."
+  },
+  "healthNoTab": {
+    "message": "No Discord tab is receiving messages. Open discord.com to continue."
+  },
+  "healthBroken": {
+    "message": "Discord changed and capture stopped. Update the extension, then reload Discord."
+  },
+  "healthMultiTab": {
+    "message": "Several Discord tabs are open. Keep one open and close the others."
+  },
+  "healthNotConsented": {
+    "message": "Capture is paused until you accept the welcome notice. Open Welcome to continue."
+  },
+  "coverageGaps": {
+    "message": "Coverage gaps"
+  },
+  "gapCovered": {
+    "message": "Recovered"
+  },
+  "recover": {
+    "message": "Recover"
+  },
+  "recoveryHint": {
+    "message": "Open #channel at the gap, then scroll up until the gap mark turns green."
+  },
+  "recoveryUnavailable": {
+    "message": "Recovery links are not available yet. Update the extension and choose channels in a collection."
+  },
+  "welcome": {
+    "message": "Welcome"
+  },
+  "welcomeCapture": {
+    "message": "This reader captures only messages your own Discord tab receives, and only from channels in your collections. It does not fetch channel history."
+  },
+  "welcomeLocal": {
+    "message": "All messages and settings stay on this device. Only Discord’s image CDN is contacted to load avatars, server icons and image thumbnails. Links open only when you choose them."
+  },
+  "welcomeRisk": {
+    "message": "Discord’s terms do not authorise this kind of tool. By continuing, you accept the risk of using it."
+  },
+  "understand": {
+    "message": "I understand"
+  },
+  "guidedSteps": {
+    "message": "Get started in three steps"
+  },
+  "openDiscordStep": {
+    "message": "Open discord.com"
+  },
+  "waitSignal": {
+    "message": "Wait for the green signal: keep Discord open while it receives messages."
+  },
+  "greenSignal": {
+    "message": "Green signal: capture is working."
+  },
+  "createFirstCollection": {
+    "message": "Create your first collection"
+  },
+  "shortcuts": {
+    "message": "Keyboard shortcuts"
+  },
+  "shortcutMove": {
+    "message": "Next / previous message"
+  },
+  "shortcutUnread": {
+    "message": "Next unread message"
+  },
+  "retention": {
+    "message": "Keep messages"
+  },
+  "retention7": {
+    "message": "7 days"
+  },
+  "retention14": {
+    "message": "14 days"
+  },
+  "retention30": {
+    "message": "30 days"
+  },
+  "retentionForever": {
+    "message": "Forever"
+  },
+  "exportCollection": {
+    "message": "Export this collection (JSON)"
+  },
+  "exportEverything": {
+    "message": "Export everything (JSON)"
   }
 }

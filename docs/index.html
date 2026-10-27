@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="ManyCords brings the server channels you choose into one quiet, local reader for Chrome and Firefox.">
+  <title>ManyCords — many channels, one reader</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="mark.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="wrap">
+    <header class="topbar">
+      <a class="brand" href="./"><img class="mark" src="mark.svg" alt="" width="36" height="36">ManyCords</a>
+      <nav aria-label="Main navigation"><a href="#reader">The reader</a><a href="privacy.html">Privacy</a></nav>
+    </header>
+    <main id="main">
+      <section class="hero" aria-labelledby="headline">
+        <div>
+          <p class="eyebrow">A local reader for Chrome &amp; Firefox</p>
+          <h1 id="headline">Many channels.<br>One quiet reader.</h1>
+          <p class="intro">Follow the conversations you care about. ManyCords reads the Discord servers you choose and brings their channels together in a calmer place.</p>
+          <div class="actions"><a class="button" href="#chrome-install">Chrome · install link pending</a><a class="button secondary" href="#firefox-install">Firefox · install link pending</a></div>
+          <p class="fine">No extra account. No analytics. Stored on your device.</p>
+        </div>
+        <svg class="flow" viewBox="0 0 380 300" fill="none" role="img" aria-labelledby="flow-title">
+          <title id="flow-title">Five coloured channels converge into one reader stream</title>
+          <g stroke="var(--line)" stroke-width="1"><path d="M24 24V276M94 24V276M164 24V276M234 24V276M304 24V276M24 44H356M24 114H356M24 184H356M24 254H356"/></g>
+          <g stroke-width="5" stroke-linecap="round">
+            <path d="M32 44H88C180 44 162 150 254 150" stroke="#6b5cff"/>
+            <path d="M32 97H90C174 97 184 150 254 150" stroke="#e8590c"/>
+            <path d="M32 256H88C180 256 162 150 254 150" stroke="#1c7ed6"/>
+            <path d="M32 203H90C174 203 184 150 254 150" stroke="#d6336c"/>
+            <path d="M32 150H254" stroke="#0ca678"/>
+            <path d="M254 150H348" stroke="var(--signal)"/>
+          </g>
+          <circle cx="348" cy="150" r="8" fill="var(--signal)"/>
+          <text x="26" y="291" fill="var(--soft)" font-family="Geist Mono,monospace" font-size="10" letter-spacing="1">YOUR CHANNELS</text>
+          <text x="250" y="291" fill="var(--soft)" font-family="Geist Mono,monospace" font-size="10" letter-spacing="1">ONE STREAM</text>
+        </svg>
+      </section>
+      <section id="reader" class="preview" aria-labelledby="reader-heading">
+        <div class="section-heading"><h2 id="reader-heading">A little room to catch up.</h2><span class="section-label">Collections / sources / conversations</span></div>
+        <figure>
+          <object class="capture capture-light" data="screenshots/reader-light.png" type="image/png" aria-label="Reader screenshot in light mode">
+            <div class="capture-fallback"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="26" height="22" rx="4"/><path d="M11 5v22M16 12h8M16 17h8M16 22h5"/></svg><strong>Reader screenshot · light theme</strong><small>Screenshot placeholder · screenshots/reader-light.png</small></div>
+          </object>
+          <object class="capture capture-dark" data="screenshots/reader-dark.png" type="image/png" aria-label="Reader screenshot in dark mode">
+            <div class="capture-fallback"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="26" height="22" rx="4"/><path d="M11 5v22M16 12h8M16 17h8M16 22h5"/></svg><strong>Reader screenshot · dark theme</strong><small>Screenshot placeholder · screenshots/reader-dark.png</small></div>
+          </object>
+          <figcaption><span>Choose a collection. Filter a source. Follow a conversation.</span><span>Light &amp; dark themes · English &amp; Spanish</span></figcaption>
+        </figure>
+      </section>
+      <section class="details" aria-label="How the reader works">
+        <article><p class="number">01 / Choose</p><h3>Your channels, together.</h3><p>Build collections across servers. Only channels included in your collections are captured. The initial “All” collection includes every server channel your tab receives; remove it to narrow your selection.</p></article>
+        <article><p class="number">02 / Follow</p><h3>Keep the thread.</h3><p>Coloured lanes connect related messages. Search recent captured messages, filter by source and mark a collection as read here without changing its read state in Discord.</p></article>
+        <article><p class="number">03 / Keep local</p><h3>A reader on your device.</h3><p>Messages stay in the browser’s extension storage. No uploads to us, no analytics and no additional account. Avatar, server icon and thumbnail images load from Discord’s CDN.</p></article>
+      </section>
+      <section class="lower" aria-label="Getting started and privacy">
+        <div id="install">
+          <p class="section-label">Get started</p><h2>Keep your tab open.<br>Give your reading some space.</h2>
+          <ol><li>Install the extension for your browser.</li><li>Open or reload your own Discord browser tab.</li><li>Open the reader from the toolbar and choose your collections.</li></ol>
+          <p>New activity appears while that tab is open. Existing history is not fetched, and capture may have gaps. Direct messages are not saved.</p>
+          <div class="install-status" aria-label="Install link placeholders"><p id="chrome-install"><strong>Chrome Web Store link</strong> — pending publication.</p><p id="firefox-install"><strong>Firefox Add-ons link</strong> — pending publication.</p></div>
+        </div>
+        <div>
+          <p class="section-label">Your data</p><h2>Made for reading.<br>Kept close to home.</h2>
+          <p>Captured messages are never sent to us or any third party. The only network requests made by the extension are CDN image loads for avatars, server icons and thumbnails.</p>
+          <p><a href="privacy.html">Read the privacy policy</a> · <a href="privacy.es.html" lang="es">Política de privacidad</a></p>
+          <p class="risk">Capturing activity from the browser is not authorised by Discord and may violate its <a href="https://discord.com/terms">terms of service</a>. Your account could be restricted or suspended. Use at your own risk.</p>
+        </div>
+      </section>
+    </main>
+    <footer><p>ManyCords is not affiliated with or endorsed by Discord Inc.</p><a href="privacy.html">Privacy</a></footer>
+  </div>
+</body>
+</html>

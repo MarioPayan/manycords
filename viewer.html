@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Discord Feed</title>
+  <title data-i18n="appName"></title>
   <style>
     /* Ported from design/prototype.html. Reader layout: sidebar (collections, sources, listening) | river with conversation lanes. */
     @font-face { font-family: "Geist"; src: url(fonts/geist.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -204,13 +204,13 @@
     <aside class="side">
       <div class="brand">
         <span class="mark"><svg class="ic" style="width:15px;height:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 19a1 1 0 1 0 0-.01"/><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/></svg></span>
-        Discord Feed<span class="grow"></span>
-        <button class="iconbtn" id="menubtn" aria-label="Ajustes" title="Ajustes" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+        <span data-i18n="appName"></span><span class="grow"></span>
+        <button class="iconbtn" id="menubtn" data-i18n-aria-label="settings" data-i18n-title="settings" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
         <div class="menu" id="menu" hidden>
-          <label>Tema <select id="theme"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label>
+          <label><span data-i18n="theme"></span> <select id="theme"><option value="system" data-i18n="systemTheme"></option><option value="light" data-i18n="lightTheme"></option><option value="dark" data-i18n="darkTheme"></option></select></label>
           <hr>
-          <button id="clean">Borrar mensajes fuera de las colecciones</button>
-          <button id="wipe" class="danger">Borrar todos los mensajes</button>
+          <button id="clean" data-i18n="cleanMessages"></button>
+          <button id="wipe" class="danger" data-i18n="wipeMessages"></button>
         </div>
       </div>
       <div class="side-scroll" id="side"></div>
@@ -221,6 +221,7 @@
       <div class="scroll" id="scroll"></div>
     </main>
   </div>
+  <script src="db.js"></script>
   <script src="threads.js"></script>
   <script src="viewer.js"></script>
 </body>

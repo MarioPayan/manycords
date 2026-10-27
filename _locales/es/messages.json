@@ -1,0 +1,405 @@
+{
+  "sourcesIn": {
+    "message": "Fuentes en $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchIn": {
+    "message": "Buscar en $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "secondsAgo": {
+    "message": "hace $COUNT$ s",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "minutesAgo": {
+    "message": "hace $COUNT$ min",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "gapRange": {
+    "message": "Hueco: $FROM$ → $TO$",
+    "placeholders": {
+      "from": {
+        "content": "$1"
+      },
+      "to": {
+        "content": "$2"
+      }
+    }
+  },
+  "gapAt": {
+    "message": "hueco $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "newCountOne": {
+    "message": "$COUNT$ nuevo",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "newCountMany": {
+    "message": "$COUNT$ nuevos",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "channelCountOne": {
+    "message": "$COUNT$ canal",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "channelCountMany": {
+    "message": "$COUNT$ canales",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "sourceCountOne": {
+    "message": "$COUNT$ fuente",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "sourceCountMany": {
+    "message": "$COUNT$ fuentes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "messageCountOne": {
+    "message": "$COUNT$ mensaje",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "messageCountMany": {
+    "message": "$COUNT$ mensajes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recentLimit": {
+    "message": "Mostrando los $COUNT$ más recientes de $TOTAL$.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "stickerLabel": {
+    "message": "sticker: $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "embedCount": {
+    "message": "$COUNT$ embed",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "selectedChannels": {
+    "message": "$COUNT$ de $TOTAL$ canales",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "allChannelsIn": {
+    "message": "Todos los canales de $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "toggleCategory": {
+    "message": "Marcar o desmarcar $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "collectionReady": {
+    "message": "«$NAME$» lista",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteCollection": {
+    "message": "¿Eliminar la colección «$NAME$»? Los mensajes guardados no se borran.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteOutside": {
+    "message": "¿Borrar $COUNT$ mensajes de canales que no están en ninguna colección?",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "server": {
+    "message": "Servidor"
+  },
+  "mention": {
+    "message": "mención"
+  },
+  "never": {
+    "message": "nunca"
+  },
+  "listening": {
+    "message": "Escuchando"
+  },
+  "noSignal": {
+    "message": "Sin señal"
+  },
+  "noResponse": {
+    "message": "La pestaña de Discord no responde: lo que pase ahora no se guarda."
+  },
+  "openDiscord": {
+    "message": "Abre discord.com en una pestaña para empezar."
+  },
+  "allSources": {
+    "message": "Todas tus fuentes"
+  },
+  "today": {
+    "message": "Hoy"
+  },
+  "yesterday": {
+    "message": "Ayer"
+  },
+  "threadPrefix": {
+    "message": "Hilo · "
+  },
+  "newCollection": {
+    "message": "Nueva colección"
+  },
+  "editCollection": {
+    "message": "Editar colección"
+  },
+  "allCollectionDescription": {
+    "message": "Esta colección incluye siempre todas tus fuentes y canales, también los nuevos."
+  },
+  "collectionDescription": {
+    "message": "Elige qué canales lees aquí. Lo que no esté en ninguna colección no se guarda."
+  },
+  "readHere": {
+    "message": "Marcado como leído aquí. En Discord no cambia nada."
+  },
+  "unnamed": {
+    "message": "Sin nombre"
+  },
+  "noOutside": {
+    "message": "No hay mensajes fuera de las colecciones."
+  },
+  "wipeConfirm": {
+    "message": "¿Borrar todos los mensajes capturados? Las colecciones se conservan."
+  },
+  "collections": {
+    "message": "Colecciones"
+  },
+  "hourlyCapture": {
+    "message": "Mensajes capturados por hora, últimas 24 h"
+  },
+  "dayAgo": {
+    "message": "-24 h"
+  },
+  "noGaps": {
+    "message": "sin huecos"
+  },
+  "now": {
+    "message": "ahora"
+  },
+  "removeFilter": {
+    "message": "Quitar filtro"
+  },
+  "clearSearch": {
+    "message": "Quitar búsqueda"
+  },
+  "search": {
+    "message": "Buscar"
+  },
+  "changeTheme": {
+    "message": "Cambiar tema"
+  },
+  "upToDate": {
+    "message": "Al día"
+  },
+  "markRead": {
+    "message": "Marcar como leído"
+  },
+  "noCollections": {
+    "message": "No tienes colecciones"
+  },
+  "createCollectionHint": {
+    "message": "Crea una para elegir qué canales quieres leer."
+  },
+  "emptyCollection": {
+    "message": "Esta colección está vacía"
+  },
+  "chooseSourcesHint": {
+    "message": "Elige de qué fuentes y canales quieres leer. Solo se guardará lo que elijas."
+  },
+  "chooseChannels": {
+    "message": "Elegir canales"
+  },
+  "nothingHere": {
+    "message": "Nada por aquí"
+  },
+  "noMatches": {
+    "message": "Ningún mensaje coincide con los filtros."
+  },
+  "noMessages": {
+    "message": "Todavía no hay mensajes"
+  },
+  "messagesHint": {
+    "message": "Aparecerán aquí mientras la pestaña de Discord siga abierta."
+  },
+  "focusConversation": {
+    "message": "Ver solo esta conversación"
+  },
+  "notAnalyzed": {
+    "message": "no analizado"
+  },
+  "openInDiscord": {
+    "message": "Abrir en Discord"
+  },
+  "reply": {
+    "message": "respuesta"
+  },
+  "edited": {
+    "message": "editado"
+  },
+  "deleted": {
+    "message": "borrado en Discord"
+  },
+  "feedEnd": {
+    "message": "Estás al día. Lo nuevo aparecerá aquí abajo."
+  },
+  "newBadge": {
+    "message": "NUEVO"
+  },
+  "unknownServers": {
+    "message": "Aún no conozco tus servidores. Recarga la pestaña de Discord y vuelve aquí."
+  },
+  "sourcesChannels": {
+    "message": "Fuentes y canales"
+  },
+  "searchSources": {
+    "message": "Buscar fuente o canal"
+  },
+  "noSearchMatches": {
+    "message": "Nada coincide con la búsqueda."
+  },
+  "close": {
+    "message": "Cerrar"
+  },
+  "name": {
+    "message": "Nombre"
+  },
+  "changeIcon": {
+    "message": "Cambiar icono"
+  },
+  "delete": {
+    "message": "Eliminar"
+  },
+  "cancel": {
+    "message": "Cancelar"
+  },
+  "done": {
+    "message": "Listo"
+  },
+  "role": {
+    "message": "rol"
+  },
+  "noText": {
+    "message": "Sin texto"
+  },
+  "fileType": {
+    "message": "ARCH"
+  },
+  "settings": {
+    "message": "Ajustes"
+  },
+  "theme": {
+    "message": "Tema"
+  },
+  "systemTheme": {
+    "message": "Sistema"
+  },
+  "lightTheme": {
+    "message": "Claro"
+  },
+  "darkTheme": {
+    "message": "Oscuro"
+  },
+  "cleanMessages": {
+    "message": "Borrar mensajes fuera de las colecciones"
+  },
+  "wipeMessages": {
+    "message": "Borrar todos los mensajes"
+  },
+  "appName": {
+    "message": "Discord Feed"
+  },
+  "appDescription": {
+    "message": "Guarda mensajes de los canales de servidores elegidos mientras una pestaña de Discord está abierta."
+  },
+  "allCollection": {
+    "message": "Todo"
+  }
+}

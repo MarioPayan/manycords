@@ -1,0 +1,405 @@
+{
+  "sourcesIn": {
+    "message": "Sources in $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchIn": {
+    "message": "Search in $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "secondsAgo": {
+    "message": "$COUNT$ s ago",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "minutesAgo": {
+    "message": "$COUNT$ min ago",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "gapRange": {
+    "message": "Gap: $FROM$ → $TO$",
+    "placeholders": {
+      "from": {
+        "content": "$1"
+      },
+      "to": {
+        "content": "$2"
+      }
+    }
+  },
+  "gapAt": {
+    "message": "gap $TIME$",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "newCountOne": {
+    "message": "$COUNT$ new",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "newCountMany": {
+    "message": "$COUNT$ new",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "channelCountOne": {
+    "message": "$COUNT$ channel",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "channelCountMany": {
+    "message": "$COUNT$ channels",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "sourceCountOne": {
+    "message": "$COUNT$ source",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "sourceCountMany": {
+    "message": "$COUNT$ sources",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "messageCountOne": {
+    "message": "$COUNT$ message",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "messageCountMany": {
+    "message": "$COUNT$ messages",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recentLimit": {
+    "message": "Showing the latest $COUNT$ of $TOTAL$ messages.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "stickerLabel": {
+    "message": "sticker: $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "embedCount": {
+    "message": "$COUNT$ embed",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "selectedChannels": {
+    "message": "$COUNT$ of $TOTAL$ channels",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "allChannelsIn": {
+    "message": "All channels in $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "toggleCategory": {
+    "message": "Select or deselect $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "collectionReady": {
+    "message": "“$NAME$” is ready",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteCollection": {
+    "message": "Delete collection “$NAME$”? Saved messages will be kept.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteOutside": {
+    "message": "Delete $COUNT$ messages from channels outside all collections?",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "server": {
+    "message": "Server"
+  },
+  "mention": {
+    "message": "mention"
+  },
+  "never": {
+    "message": "never"
+  },
+  "listening": {
+    "message": "Listening"
+  },
+  "noSignal": {
+    "message": "No signal"
+  },
+  "noResponse": {
+    "message": "The Discord tab is not responding: new activity is not being saved."
+  },
+  "openDiscord": {
+    "message": "Open discord.com in a tab to start."
+  },
+  "allSources": {
+    "message": "All your sources"
+  },
+  "today": {
+    "message": "Today"
+  },
+  "yesterday": {
+    "message": "Yesterday"
+  },
+  "threadPrefix": {
+    "message": "Thread · "
+  },
+  "newCollection": {
+    "message": "New collection"
+  },
+  "editCollection": {
+    "message": "Edit collection"
+  },
+  "allCollectionDescription": {
+    "message": "This collection always includes all your sources and channels, including new ones."
+  },
+  "collectionDescription": {
+    "message": "Choose which channels to read here. Channels outside all collections are not saved."
+  },
+  "readHere": {
+    "message": "Marked as read here. Nothing changes in Discord."
+  },
+  "unnamed": {
+    "message": "Untitled"
+  },
+  "noOutside": {
+    "message": "There are no messages outside the collections."
+  },
+  "wipeConfirm": {
+    "message": "Delete all captured messages? Collections will be kept."
+  },
+  "collections": {
+    "message": "Collections"
+  },
+  "hourlyCapture": {
+    "message": "Messages captured per hour, last 24 h"
+  },
+  "dayAgo": {
+    "message": "-24 h"
+  },
+  "noGaps": {
+    "message": "no gaps"
+  },
+  "now": {
+    "message": "now"
+  },
+  "removeFilter": {
+    "message": "Remove filter"
+  },
+  "clearSearch": {
+    "message": "Clear search"
+  },
+  "search": {
+    "message": "Search"
+  },
+  "changeTheme": {
+    "message": "Change theme"
+  },
+  "upToDate": {
+    "message": "Up to date"
+  },
+  "markRead": {
+    "message": "Mark as read"
+  },
+  "noCollections": {
+    "message": "You have no collections"
+  },
+  "createCollectionHint": {
+    "message": "Create one to choose which channels to read."
+  },
+  "emptyCollection": {
+    "message": "This collection is empty"
+  },
+  "chooseSourcesHint": {
+    "message": "Choose which sources and channels to read. Only your selection will be saved."
+  },
+  "chooseChannels": {
+    "message": "Choose channels"
+  },
+  "nothingHere": {
+    "message": "Nothing here"
+  },
+  "noMatches": {
+    "message": "No messages match the filters."
+  },
+  "noMessages": {
+    "message": "No messages yet"
+  },
+  "messagesHint": {
+    "message": "Messages will appear here while the Discord tab stays open."
+  },
+  "focusConversation": {
+    "message": "Show only this conversation"
+  },
+  "notAnalyzed": {
+    "message": "not analyzed"
+  },
+  "openInDiscord": {
+    "message": "Open in Discord"
+  },
+  "reply": {
+    "message": "reply"
+  },
+  "edited": {
+    "message": "edited"
+  },
+  "deleted": {
+    "message": "deleted in Discord"
+  },
+  "feedEnd": {
+    "message": "You’re up to date. New messages will appear below."
+  },
+  "newBadge": {
+    "message": "NEW"
+  },
+  "unknownServers": {
+    "message": "Your servers are not available yet. Reload the Discord tab and come back."
+  },
+  "sourcesChannels": {
+    "message": "Sources and channels"
+  },
+  "searchSources": {
+    "message": "Search sources or channels"
+  },
+  "noSearchMatches": {
+    "message": "Nothing matches your search."
+  },
+  "close": {
+    "message": "Close"
+  },
+  "name": {
+    "message": "Name"
+  },
+  "changeIcon": {
+    "message": "Change icon"
+  },
+  "delete": {
+    "message": "Delete"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "done": {
+    "message": "Done"
+  },
+  "role": {
+    "message": "role"
+  },
+  "noText": {
+    "message": "No text"
+  },
+  "fileType": {
+    "message": "FILE"
+  },
+  "settings": {
+    "message": "Settings"
+  },
+  "theme": {
+    "message": "Theme"
+  },
+  "systemTheme": {
+    "message": "System"
+  },
+  "lightTheme": {
+    "message": "Light"
+  },
+  "darkTheme": {
+    "message": "Dark"
+  },
+  "cleanMessages": {
+    "message": "Delete messages outside collections"
+  },
+  "wipeMessages": {
+    "message": "Delete all messages"
+  },
+  "appName": {
+    "message": "Discord Feed"
+  },
+  "appDescription": {
+    "message": "Passively saves messages from selected server channels while a Discord tab is open."
+  },
+  "allCollection": {
+    "message": "All"
+  }
+}

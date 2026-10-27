@@ -1,11 +1,13 @@
-// Discord Feed viewer, ported from design/prototype.html onto the extension's storage.
-// Storage: trays (collections), c:<id> channel meta, m:<id> messages, e:* coverage events, lastSignal, theme.
+// Reader UI, ported from design/prototype.html onto the extension's storage.
+// IndexedDB holds records; storage.local holds collections, revisions and settings.
 const api = globalThis.browser ?? chrome;
 const store = api.storage.local;
+const t = (key, substitutions = []) => api.i18n.getMessage(key, substitutions.map(String));
+const h = (key, substitutions) => esc(t(key, substitutions));
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmtFull = (t) => new Date(t).toLocaleString();
-const hm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtFull = (c) => new Date(c).toLocaleString();
+const hm = (c) => new Date(c).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 // golden-angle spread so neighbouring ids (snowflakes created close together) still get distinct colours
 const hue = (id) => Math.round(([...String(id)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) * 137.508) % 360);
 const THREAD_TYPES = [10, 11, 12];
@@ -14,37 +16,55 @@ const MAX_SHOWN = 400;
 const LANE_COLORS = 6, MAX_LANES = 8;
 const EMOJIS = ['📣', '⭐', '🎨', '🛠️', '🎮', '🔥', '📰', '🧪', '🌐', '💬', '📁'];
 
-let S = { trays: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], people: new Map() };
-const ui = { tray: null, src: '', conv: '', q: '', hover: null, edit: null, feedKey: null };
+let S = { collections: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], stats: {}, buckets: Array(24).fill(0), people: new Map() };
+const ui = { collection: null, src: '', conv: '', q: '', hover: null, edit: null, feedKey: null };
 
-async function load() {
-  // ponytail: loads the whole store each render; move messages to IndexedDB with indexes if it gets slow
-  const all = await store.get(null);
-  // a collection being created is not stored until "Listo": keep it across the reloads incoming messages trigger
-  const pending = ui.edit?.isNew && S.trays.find((t) => t.id === ui.tray);
-  S = { trays: all.trays ?? [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], people: new Map(), lastSignal: all.lastSignal, theme: all.theme ?? 'system' };
-  for (const [k, v] of Object.entries(all)) {
-    if (k.startsWith('m:')) { S.msgs.push(v); if (v.author?.id) S.people.set(v.author.id, v.author.name); }
-    else if (k.startsWith('e:')) S.events.push(v);
-    else if (k.startsWith('c:')) {
-      S.chans[v.id] = v;
-      if (v.guild_name) S.guilds[v.guild_id] = v.guild_name;
-      if (v.guild_icon) S.icons[v.guild_id] = v.guild_icon;
+let settingsKey, collectionsKey;
+async function load(force = false) {
+  const settings = await store.get(['collections', 'lastSignal', 'theme', 'rev']);
+  const key = JSON.stringify([settings.collections, settings.theme]);
+  const revised = S.rev !== settings.rev || settingsKey === undefined;
+  if (!force && !revised && key === settingsKey) return false;
+  const nextCollectionsKey = JSON.stringify(settings.collections ?? []);
+  const changedCollections = collectionsKey !== nextCollectionsKey;
+  // Keep an unsaved collection across incoming capture revisions.
+  const pending = ui.edit?.isNew && collection();
+  S.collections = settings.collections ?? [];
+  if (pending && !S.collections.some((c) => c.id === pending.id)) S.collections.push(pending);
+  if (!S.collections.some((c) => c.id === ui.collection)) ui.collection = S.collections[0]?.id ?? null;
+  S.lastSignal = settings.lastSignal;
+  S.theme = settings.theme ?? 'system';
+  if (revised) {
+    const [channels, events] = await Promise.all([feedDB.channels(), feedDB.events(Date.now() - 864e5)]);
+    S.chans = Object.fromEntries(channels.map((c) => [c.id, c]));
+    S.guilds = {}; S.icons = {}; S.events = events;
+    for (const c of channels) {
+      if (c.guild_name) S.guilds[c.guild_id] = c.guild_name;
+      if (c.guild_icon) S.icons[c.guild_id] = c.guild_icon;
     }
   }
-  if (pending && !S.trays.some((t) => t.id === pending.id)) S.trays.push(pending);
-  if (!S.trays.some((t) => t.id === ui.tray)) ui.tray = S.trays[0]?.id ?? null;
+  if (revised || changedCollections || force) {
+    const [messages, overview] = await Promise.all([
+      feedDB.recent(collection(), S.chans, MAX_SHOWN),
+      feedDB.overview(S.collections, S.chans, Date.now()),
+    ]);
+    S.msgs = messages;
+    S.people = new Map(messages.filter((m) => m.author?.id).map((m) => [m.author.id, m.author.name]));
+    S.stats = overview.stats; S.buckets = overview.buckets;
+  }
+  S.rev = settings.rev; settingsKey = key; collectionsKey = nextCollectionsKey;
+  return true;
 }
 
-const tray = () => S.trays.find((t) => t.id === ui.tray);
-const saveTrays = () => store.set({ trays: S.trays });
+const collection = () => S.collections.find((c) => c.id === ui.collection);
+const saveCollections = () => store.set({ collections: S.collections });
 const isThread = (id) => THREAD_TYPES.includes(S.chans[id]?.type);
 const baseChannel = (m) => (isThread(m.channel_id) ? S.chans[m.channel_id].parent_id : m.channel_id);
-const inTray = (t, m) => t.all || t.ids.includes(m.channel_id) || t.ids.includes(baseChannel(m));
-const isUnread = (t, m) => Date.parse(m.timestamp) > (t.readAt ?? 0);
+const inCollection = (c, m) => c.all || c.ids.includes(m.channel_id) || c.ids.includes(baseChannel(m));
+const isUnread = (c, m) => Date.parse(m.timestamp) > (c.readAt ?? 0);
 const chanName = (id) => S.chans[id]?.name ?? id;
-const emojiOf = (t) => t.emoji ?? (t.all ? '🌐' : '📁');
-const guildName = (g) => S.guilds[g] ?? 'Servidor';
+const emojiOf = (c) => c.emoji ?? (c.all ? '🌐' : '📁');
+const guildName = (g) => S.guilds[g] ?? t('server');
 const initials = (name) => name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 const isDark = () => (S.theme === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : S.theme === 'dark');
 
@@ -77,8 +97,8 @@ document.addEventListener('error', (e) => {
 // Message text: escape first, then render Discord's markup tokens.
 const richText = (s) => esc(s)
   .replace(/&lt;a?(:\w+:)\d+&gt;/g, '$1')
-  .replace(/&lt;@!?(\d+)&gt;/g, (_, id) => `<span class="ment">@${esc(S.people.get(id) ?? 'mención')}</span>`)
-  .replace(/&lt;@&amp;\d+&gt;/g, '<span class="ment">@rol</span>')
+  .replace(/&lt;@!?(\d+)&gt;/g, (_, id) => `<span class="ment">@${esc(S.people.get(id) ?? t('mention'))}</span>`)
+  .replace(/&lt;@&amp;\d+&gt;/g, `<span class="ment">@${h('role')}</span>`)
   .replace(/&lt;#(\d+)&gt;/g, (_, id) => `<span class="ment">#${esc(chanName(id))}</span>`)
   .replace(/@(everyone|here)\b/g, '<span class="ment">@$1</span>');
 
@@ -96,18 +116,18 @@ const I = {
 
 /* ---------------- sidebar ---------------- */
 function renderSide() {
-  const t = tray();
-  const unreadIn = (x, f = () => true) => S.msgs.filter((m) => inTray(x, m) && isUnread(x, m) && f(m)).length;
-  let html = `<div class="group"><span>Colecciones</span><button id="add" aria-label="Nueva colección" title="Nueva colección">${I.plus}</button></div>`
-    + S.trays.map((x) => {
+  const c = collection();
+  const unreadIn = (x, guild) => guild ? S.stats[x.id]?.guilds[guild] ?? 0 : S.stats[x.id]?.unread ?? 0;
+  let html = `<div class="group"><span>${h('collections')}</span><button id="add" aria-label="${h('newCollection')}" title="${h('newCollection')}">${I.plus}</button></div>`
+    + S.collections.map((x) => {
       const n = unreadIn(x);
-      return `<button class="item ${x.id === ui.tray ? 'on' : ''} ${n ? 'unread' : ''}" data-tray="${esc(x.id)}"><span class="em">${esc(emojiOf(x))}</span><span class="nm">${esc(x.name)}</span><span class="n">${n > 999 ? '999+' : n || ''}</span></button>`;
+      return `<button class="item ${x.id === ui.collection ? 'on' : ''} ${n ? 'unread' : ''}" data-collection="${esc(x.id)}"><span class="em">${esc(emojiOf(x))}</span><span class="nm">${esc(x.name)}</span><span class="n">${n > 999 ? '999+' : n || ''}</span></button>`;
     }).join('');
-  if (t) {
-    const srcs = [...new Set(S.msgs.filter((m) => inTray(t, m)).map((m) => m.guild_id))].sort((a, b) => guildName(a).localeCompare(guildName(b)));
+  if (c) {
+    const srcs = Object.keys(S.stats[c.id]?.guilds ?? {}).sort((a, b) => guildName(a).localeCompare(guildName(b)));
     if (ui.src && !srcs.includes(ui.src)) ui.src = '';
-    if (srcs.length) html += `<div class="group"><span>Fuentes en ${esc(t.name)}</span></div>` + srcs.map((g) => {
-      const n = unreadIn(t, (m) => m.guild_id === g);
+    if (srcs.length) html += `<div class="group"><span>${h('sourcesIn', [c.name])}</span></div>` + srcs.map((g) => {
+      const n = unreadIn(c, g);
       return `<button class="item ${ui.src === g ? 'on' : ''} ${n ? 'unread' : ''}" data-src="${esc(g)}">${fav(g)}<span class="nm">${esc(guildName(g))}</span><span class="n">${n || ''}</span></button>`;
     }).join('');
   }
@@ -117,36 +137,35 @@ function renderSide() {
   const age = S.lastSignal ? (Date.now() - S.lastSignal) / 1000 : Infinity;
   const live = age <= 180;
   const now = Date.now(), H = 3600e3;
-  const buckets = Array(24).fill(0);
-  for (const m of S.msgs) { const i = 23 - Math.floor((now - (m.captured_at ?? Date.parse(m.timestamp))) / H); if (i >= 0 && i < 24) buckets[i]++; }
+  const buckets = S.buckets;
   const gaps = S.events.filter((e) => e.type === 'gap' && e.to > now - 24 * H);
   const inGap = (i) => gaps.some((g) => g.from < now - (23 - i) * H && g.to > now - (24 - i) * H);
   const max = Math.max(1, ...buckets);
   const lastGap = [...gaps].sort((a, b) => b.to - a.to)[0];
-  const ageLabel = !S.lastSignal ? 'nunca' : age < 60 ? `hace ${Math.max(1, Math.round(age))} s` : age < 3600 ? `hace ${Math.round(age / 60)} min` : fmtFull(S.lastSignal);
+  const ageLabel = !S.lastSignal ? t('never') : age < 60 ? t('secondsAgo', [Math.max(1, Math.round(age))]) : age < 3600 ? t('minutesAgo', [Math.round(age / 60)]) : fmtFull(S.lastSignal);
   $('#status').className = `status ${live ? '' : 'off'}`;
-  $('#status').innerHTML = `<div class="row"><span class="pulse"></span><b>${live ? 'Escuchando' : 'Sin señal'}</b><small>${ageLabel}</small></div>
-    ${live ? '' : `<div class="warnline">${S.lastSignal ? 'La pestaña de Discord no responde: lo que pase ahora no se guarda.' : 'Abre discord.com en una pestaña para empezar.'}</div>`}
-    <div class="spark" title="Mensajes capturados por hora, últimas 24 h">${buckets.map((n, i) => (inGap(i) ? '<i class="gap"></i>' : n ? `<i style="height:${10 + (n / max) * 90}%"></i>` : '<i class="none"></i>')).join('')}</div>
-    <div class="legend"><span>-24 h</span>${lastGap ? `<span class="g" title="Hueco: ${esc(fmtFull(lastGap.from))} → ${esc(fmtFull(lastGap.to))}">hueco ${hm(lastGap.from)}</span>` : '<span>sin huecos</span>'}<span>ahora</span></div>`;
+  $('#status').innerHTML = `<div class="row"><span class="pulse"></span><b>${live ? t('listening') : t('noSignal')}</b><small>${ageLabel}</small></div>
+    ${live ? '' : `<div class="warnline">${S.lastSignal ? t('noResponse') : t('openDiscord')}</div>`}
+    <div class="spark" title="${h('hourlyCapture')}">${buckets.map((n, i) => (inGap(i) ? '<i class="gap"></i>' : n ? `<i style="height:${10 + (n / max) * 90}%"></i>` : '<i class="none"></i>')).join('')}</div>
+    <div class="legend"><span>${h('dayAgo')}</span>${lastGap ? `<span class="g" title="${h('gapRange', [fmtFull(lastGap.from), fmtFull(lastGap.to)])}">${h('gapAt', [hm(lastGap.from)])}</span>` : `<span>${h('noGaps')}</span>`}<span>${h('now')}</span></div>`;
 }
 
 /* ---------------- header ---------------- */
-function renderHead(t, list, convs) {
-  const n = list.filter((m) => isUnread(t, m)).length;
-  const chans = t.ids.length;
-  const srcN = new Set(t.ids.map((id) => S.chans[id]?.guild_id).filter(Boolean)).size;
+function renderHead(c, list, convs) {
+  const n = list.filter((m) => isUnread(c, m)).length;
+  const chans = c.ids.length;
+  const srcN = new Set(c.ids.map((id) => S.chans[id]?.guild_id).filter(Boolean)).size;
   const chips = [];
-  if (ui.src) chips.push(`<span class="chipf">${fav(ui.src)}<span>${esc(guildName(ui.src))}</span><button data-clear="src" aria-label="Quitar filtro">${I.x}</button></span>`);
-  if (ui.conv && convs.has(ui.conv)) chips.push(`<span class="chipf"><span class="sw" style="background:${laneColor(ui.conv)}"></span><span>${esc(convs.get(ui.conv).title)}</span><button data-clear="conv" aria-label="Quitar filtro">${I.x}</button></span>`);
-  if (ui.q) chips.push(`<span class="chipf"><span>“${esc(ui.q)}”</span><button data-clear="q" aria-label="Quitar búsqueda">${I.x}</button></span>`);
+  if (ui.src) chips.push(`<span class="chipf">${fav(ui.src)}<span>${esc(guildName(ui.src))}</span><button data-clear="src" aria-label="${h('removeFilter')}">${I.x}</button></span>`);
+  if (ui.conv && convs.has(ui.conv)) chips.push(`<span class="chipf"><span class="sw" style="background:${laneColor(ui.conv)}"></span><span>${esc(convs.get(ui.conv).title)}</span><button data-clear="conv" aria-label="${h('removeFilter')}">${I.x}</button></span>`);
+  if (ui.q) chips.push(`<span class="chipf"><span>“${esc(ui.q)}”</span><button data-clear="q" aria-label="${h('clearSearch')}">${I.x}</button></span>`);
   const hadFocus = document.activeElement?.id === 'q';
-  $('#head').innerHTML = `<div class="titlerow"><span class="em">${esc(emojiOf(t))}</span><h1>${esc(t.name)}</h1><button class="iconbtn" id="edit" aria-label="Editar colección" title="Editar colección">${I.pen}</button>
-      <span class="grow"></span><label class="search">${I.search}<input id="q" placeholder="Buscar en ${esc(t.name)}" value="${esc(ui.q)}" aria-label="Buscar"></label>
-      <button class="iconbtn" id="themebtn" aria-label="Cambiar tema" title="Cambiar tema">${isDark() ? I.sun : I.moon}</button></div>
-    <div class="subrow">${n ? `<span class="newpill">${n} nuevo${n > 1 ? 's' : ''}</span>` : '<span class="mono" style="font-size:12px">Al día</span>'}
-      <span>${t.all ? 'Todas tus fuentes' : `${chans} canal${chans === 1 ? '' : 'es'} · ${srcN} fuente${srcN === 1 ? '' : 's'}`}</span>
-      ${chips.join('')}<span class="grow"></span>${n ? '<button class="textbtn" id="markread">Marcar como leído</button>' : ''}</div>`;
+  $('#head').innerHTML = `<div class="titlerow"><span class="em">${esc(emojiOf(c))}</span><h1>${esc(c.name)}</h1><button class="iconbtn" id="edit" aria-label="${h('editCollection')}" title="${h('editCollection')}">${I.pen}</button>
+      <span class="grow"></span><label class="search">${I.search}<input id="q" placeholder="${h('searchIn', [c.name])}" value="${esc(ui.q)}" aria-label="${h('search')}"></label>
+      <button class="iconbtn" id="themebtn" aria-label="${h('changeTheme')}" title="${h('changeTheme')}">${isDark() ? I.sun : I.moon}</button></div>
+    <div class="subrow">${n ? `<span class="newpill">${h(n === 1 ? 'newCountOne' : 'newCountMany', [n])}</span>` : `<span class="mono" style="font-size:12px">${h('upToDate')}</span>`}
+      <span>${c.all ? t('allSources') : `${t(chans === 1 ? 'channelCountOne' : 'channelCountMany', [chans])} · ${t(srcN === 1 ? 'sourceCountOne' : 'sourceCountMany', [srcN])}`}</span>
+      ${chips.join('')}<span class="grow"></span>${n ? `<button class="textbtn" id="markread">${h('markRead')}</button>` : ''}</div>`;
   if (hadFocus) { const i = $('#q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
 
@@ -155,14 +174,14 @@ let laneIdx = new Map();
 const laneColor = (k) => `var(--l${(laneIdx.get(k) ?? 0) % LANE_COLORS})`;
 
 function renderRiver() {
-  const t = tray();
-  if (!t) {
+  const c = collection();
+  if (!c) {
     $('#head').innerHTML = '';
-    $('#scroll').innerHTML = `<div class="empty"><h2>No tienes colecciones</h2><p>Crea una para elegir qué canales quieres leer.</p><button class="btn primary" id="add2">Nueva colección</button></div>`;
+    $('#scroll').innerHTML = `<div class="empty"><h2>${h('noCollections')}</h2><p>${h('createCollectionHint')}</p><button class="btn primary" id="add2">${h('newCollection')}</button></div>`;
     return;
   }
-  const all = S.msgs.filter((m) => inTray(t, m));
-  const { convOf, convs } = assignConversations(all, { isThread, threadName: (id) => S.chans[id]?.name });
+  const all = S.msgs.filter((m) => inCollection(c, m));
+  const { convOf, convs } = assignConversations(all, { isThread, threadName: (id) => S.chans[id]?.name, noText: t('noText') });
   const q = ui.q.toLowerCase();
   if (ui.conv && !convs.has(ui.conv)) ui.conv = '';
   const filtered = all.filter((m) => (!ui.src || m.guild_id === ui.src) && (!ui.conv || convOf.get(m.id) === ui.conv)
@@ -174,18 +193,18 @@ function renderRiver() {
   const first = new Map(), last = new Map();
   list.forEach((m, i) => { const k = convOf.get(m.id); if (!first.has(k)) first.set(k, i); last.set(k, i); });
   laneIdx = new Map([...first.keys()].map((k, i) => [k, i]));
-  renderHead(t, list, convs);
+  renderHead(c, list, convs);
 
-  if (!t.all && !t.ids.length) {
+  if (!c.all && !c.ids.length) {
     $('#scroll').innerHTML = `<div class="empty"><svg width="96" height="72" viewBox="0 0 96 72" fill="none" stroke="currentColor" stroke-width="2" opacity=".5"><path d="M10 60c20 0 26-48 46-48s20 30 30 30"/><path d="M10 60c12 0 18-20 34-20s22 20 42 20"/><circle cx="10" cy="60" r="4"/><circle cx="86" cy="42" r="4"/></svg>
-      <h2>Esta colección está vacía</h2><p>Elige de qué fuentes y canales quieres leer. Solo se guardará lo que elijas.</p><button class="btn primary" id="emptyedit">Elegir canales</button></div>`;
+      <h2>${h('emptyCollection')}</h2><p>${h('chooseSourcesHint')}</p><button class="btn primary" id="emptyedit">${h('chooseChannels')}</button></div>`;
     ui.feedKey = null;
     return;
   }
   if (!list.length) {
     $('#scroll').innerHTML = all.length
-      ? '<div class="empty"><h2>Nada por aquí</h2><p>Ningún mensaje coincide con los filtros.</p></div>'
-      : '<div class="empty"><h2>Todavía no hay mensajes</h2><p>Aparecerán aquí mientras la pestaña de Discord siga abierta.</p></div>';
+      ? `<div class="empty"><h2>${h('nothingHere')}</h2><p>${h('noMatches')}</p></div>`
+      : `<div class="empty"><h2>${h('noMessages')}</h2><p>${h('messagesHint')}</p></div>`;
     ui.feedKey = null;
     return;
   }
@@ -202,35 +221,35 @@ function renderRiver() {
   });
   const gut = 30 + (Math.max(...lane.values()) + 1) * 16;
 
-  let html = filtered.length > list.length ? `<div class="more">Mostrando los ${MAX_SHOWN} más recientes de ${filtered.length}. Usa los filtros para ver otros.</div>` : '';
+  let html = (S.stats[c.id]?.total ?? 0) > MAX_SHOWN ? `<div class="more">${h('recentLimit', [MAX_SHOWN, S.stats[c.id]?.total ?? filtered.length])}</div>` : '';
   let lastDay = '';
   const today = new Date().toDateString(), yesterday = new Date(Date.now() - 864e5).toDateString();
   list.forEach((m, i) => {
     const k = convOf.get(m.id), cv = convs.get(k), d = new Date(m.timestamp).toDateString();
-    if (d !== lastDay) { html += `<div class="day">${d === today ? 'Hoy' : d === yesterday ? 'Ayer' : esc(new Date(m.timestamp).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}</div>`; lastDay = d; }
+    if (d !== lastDay) { html += `<div class="day">${d === today ? t('today') : d === yesterday ? t('yesterday') : esc(new Date(m.timestamp).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}</div>`; lastDay = d; }
     const base = baseChannel(m);
     if (first.get(k) === i) {
       const n = list.filter((x) => convOf.get(x.id) === k).length;
-      html += `<div class="conv" data-c="${esc(k)}" style="--c:${laneColor(k)}"><button data-focus="${esc(k)}" title="Ver solo esta conversación"><span class="tt">${k.startsWith('thread:') ? 'Hilo · ' : ''}${esc(cv.title)}</span></button>`
-        + `<span class="cm">${n} mensaje${n > 1 ? 's' : ''} · #${esc(chanName(base))} · ${esc(guildName(m.guild_id))}</span></div>`;
+      html += `<div class="conv" data-c="${esc(k)}" style="--c:${laneColor(k)}"><button data-focus="${esc(k)}" title="${h('focusConversation')}"><span class="tt">${k.startsWith('thread:') ? t('threadPrefix') : ''}${esc(cv.title)}</span></button>`
+        + `<span class="cm">${h(n === 1 ? 'messageCountOne' : 'messageCountMany', [n])} · #${esc(chanName(base))} · ${esc(guildName(m.guild_id))}</span></div>`;
     }
     const reply = m.reply_to && S.msgs.find((x) => x.id === m.reply_to);
     const link = esc(`https://discord.com/channels/${m.guild_id}/${m.channel_id}/${m.id}`);
-    const files = (m.attachments ?? []).map((a) => `<div class="file"><span class="ft">${esc((a.filename.split('.').pop() || 'FILE').slice(0, 4).toUpperCase())}</span><div>${esc(a.filename)}<small>no analizado</small></div></div>`).join('');
-    const extras = [...(m.stickers ?? []).map((s) => `sticker: ${s}`), m.embeds ? `${m.embeds} embed` : ''].filter(Boolean);
-    html += `<div class="entry ${isUnread(t, m) ? 'unread' : ''} ${m.deleted_at ? 'deleted' : ''}" data-c="${esc(k)}">
+    const files = (m.attachments ?? []).map((a) => `<div class="file"><span class="ft">${esc((a.filename.split('.').pop() || t('fileType')).slice(0, 4).toUpperCase())}</span><div>${esc(a.filename)}<small>${h('notAnalyzed')}</small></div></div>`).join('');
+    const extras = [...(m.stickers ?? []).map((s) => t('stickerLabel', [s])), m.embeds ? t('embedCount', [m.embeds]) : ''].filter(Boolean);
+    html += `<div class="entry ${isUnread(c, m) ? 'unread' : ''} ${m.deleted_at ? 'deleted' : ''}" data-c="${esc(k)}">
       ${avatar(m.author, m.guild_id)}
       <div><div class="h"><span class="who">${esc(m.author?.name ?? '?')}</span><span class="t" title="${esc(fmtFull(m.timestamp))}">${hm(m.timestamp)}</span>
-        <a class="where" href="${link}" target="_blank" title="Abrir en Discord">${fav(m.guild_id)}#${esc(chanName(base))}${isThread(m.channel_id) ? ` › ${esc(chanName(m.channel_id))}` : ''}</a>
-        ${reply ? `<span class="re">↳ ${esc(reply.author?.name ?? '')}</span>` : m.reply_to ? '<span class="re">↳ respuesta</span>' : ''}
-        ${m.edited_timestamp ? '<span class="tag">editado</span>' : ''}${m.deleted_at ? '<span class="tag">borrado en Discord</span>' : ''}</div>
+        <a class="where" href="${link}" target="_blank" title="${h('openInDiscord')}">${fav(m.guild_id)}#${esc(chanName(base))}${isThread(m.channel_id) ? ` › ${esc(chanName(m.channel_id))}` : ''}</a>
+        ${reply ? `<span class="re">↳ ${esc(reply.author?.name ?? '')}</span>` : m.reply_to ? `<span class="re">↳ ${h('reply')}</span>` : ''}
+        ${m.edited_timestamp ? `<span class="tag">${h('edited')}</span>` : ''}${m.deleted_at ? `<span class="tag">${h('deleted')}</span>` : ''}</div>
       ${m.content ? `<div class="txt">${richText(m.content)}</div>` : ''}${extras.length ? `<div class="tag">${esc(extras.join(' · '))}</div>` : ''}${files}</div>
-      <div class="tools"><button data-focus="${esc(k)}" title="Ver solo esta conversación" aria-label="Ver solo esta conversación">${I.focus}</button><a href="${link}" target="_blank" title="Abrir en Discord" aria-label="Abrir en Discord">${I.ext}</a></div></div>`;
+      <div class="tools"><button data-focus="${esc(k)}" title="${h('focusConversation')}" aria-label="${h('focusConversation')}">${I.focus}</button><a href="${link}" target="_blank" title="${h('openInDiscord')}" aria-label="${h('openInDiscord')}">${I.ext}</a></div></div>`;
   });
-  html += `<div class="endcap"><span class="ok">${I.check}</span>Estás al día. Lo nuevo aparecerá aquí abajo.</div>`;
+  html += `<div class="endcap"><span class="ok">${I.check}</span>${h('feedEnd')}</div>`;
 
   const sc = $('#scroll');
-  const key = `${t.id}|${ui.src}|${ui.conv}|${ui.q}`;
+  const key = `${c.id}|${ui.src}|${ui.conv}|${ui.q}`;
   const atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80, keep = sc.scrollTop;
   sc.innerHTML = `<div class="river" style="--gut:${gut}px">${html}<svg class="graph"></svg></div>`;
   const river = sc.querySelector('.river'), svg = river.querySelector('svg.graph');
@@ -284,8 +303,8 @@ function render() {
 
 /* ---------------- edit collection sheet ---------------- */
 function openEdit(isNew) {
-  const t = tray();
-  ui.edit = { name: t.name, emoji: emojiOf(t), ids: new Set(t.ids), q: '', isNew };
+  const c = collection();
+  ui.edit = { name: c.name, emoji: emojiOf(c), ids: new Set(c.ids), q: '', isNew };
   drawSheet();
   setTimeout(() => { const n = $('#cname'); n?.focus(); if (isNew) n?.select(); }, 40);
 }
@@ -294,12 +313,12 @@ const listenableChans = () => Object.values(S.chans).filter((c) => c.guild_id &&
 const channelIdsOf = (pred) => listenableChans().filter(pred).map((c) => c.id);
 
 function drawSheet() {
-  const e = ui.edit, t = tray(), q = e.q.toLowerCase();
+  const e = ui.edit, c = collection(), q = e.q.toLowerCase();
   if ($('#cname')) e.name = $('#cname').value; // keep what was typed across redraws
   const chans = Object.values(S.chans);
   const listenable = listenableChans();
   const byPos = (a, b) => (a.position ?? 0) - (b.position ?? 0) || (a.name ?? '').localeCompare(b.name ?? '');
-  const isNewCh = (c) => t.seen?.length > 0 && !t.seen.includes(c.id);
+  const isNewCh = (channel) => c.seen?.length > 0 && !c.seen.includes(channel.id);
   const guilds = [...new Set(listenable.map((c) => c.guild_id))].sort((a, b) => guildName(a).localeCompare(guildName(b)));
   const cards = guilds.map((g) => {
     const mine = listenable.filter((c) => c.guild_id === g);
@@ -307,26 +326,26 @@ function drawSheet() {
     if (!shown.length) return '';
     const on = mine.filter((c) => e.ids.has(c.id)).length;
     const pills = (list) => `<div class="pills">${[...list].sort(byPos).map((c) =>
-      `<button class="pill ${e.ids.has(c.id) ? 'on' : ''}" data-pill="${esc(c.id)}" aria-pressed="${e.ids.has(c.id)}">#${esc(c.name)}${isNewCh(c) ? '<span class="nw">NUEVO</span>' : ''}</button>`).join('')}</div>`;
+      `<button class="pill ${e.ids.has(c.id) ? 'on' : ''}" data-pill="${esc(c.id)}" aria-pressed="${e.ids.has(c.id)}">#${esc(c.name)}${isNewCh(c) ? `<span class="nw">${h('newBadge')}</span>` : ''}</button>`).join('')}</div>`;
     const loose = shown.filter((c) => !S.chans[c.parent_id]);
     const cats = chans.filter((c) => c.guild_id === g && c.type === 4).sort(byPos)
       .map((cat) => [cat, shown.filter((c) => c.parent_id === cat.id)]).filter(([, kids]) => kids.length);
-    return `<div class="sc ${on ? 'active' : ''}"><div class="sc-h">${fav(g)}<div><b>${esc(guildName(g))}</b><small>${on ? `${on} de ${mine.length} canales` : `${mine.length} canales`}</small></div>
-      <button class="switch ${on === mine.length ? 'on' : on ? 'part' : ''}" data-all="${esc(g)}" role="switch" aria-checked="${on === mine.length}" aria-label="Todos los canales de ${esc(guildName(g))}"></button></div>
+    return `<div class="sc ${on ? 'active' : ''}"><div class="sc-h">${fav(g)}<div><b>${esc(guildName(g))}</b><small>${on ? t('selectedChannels', [on, mine.length]) : t(mine.length === 1 ? 'channelCountOne' : 'channelCountMany', [mine.length])}</small></div>
+      <button class="switch ${on === mine.length ? 'on' : on ? 'part' : ''}" data-all="${esc(g)}" role="switch" aria-checked="${on === mine.length}" aria-label="${h('allChannelsIn', [guildName(g)])}"></button></div>
       ${loose.length ? `<div class="cg">${pills(loose)}</div>` : ''}
-      ${cats.map(([cat, kids]) => `<div class="cg"><button data-cat="${esc(cat.id)}" title="Marcar o desmarcar ${esc(cat.name)}">${esc(cat.name)}</button>${pills(kids)}</div>`).join('')}</div>`;
+      ${cats.map(([cat, kids]) => `<div class="cg"><button data-cat="${esc(cat.id)}" title="${h('toggleCategory', [cat.name])}">${esc(cat.name)}</button>${pills(kids)}</div>`).join('')}</div>`;
   }).join('');
-  const picker = t.all ? '' : !listenable.length
-    ? '<p class="mono" style="color:var(--faint);font-size:13px">Aún no conozco tus servidores. Recarga la pestaña de Discord y vuelve aquí.</p>'
-    : `<div><label class="lab" for="sq">Fuentes y canales</label><div class="pickhead"><input class="inp" id="sq" placeholder="Buscar fuente o canal" value="${esc(e.q)}"><span class="selc"><b>${e.ids.size}</b> canales</span></div><div class="srccards">${cards || '<p class="mono" style="color:var(--faint);font-size:13px">Nada coincide con la búsqueda.</p>'}</div></div>`;
+  const picker = c.all ? '' : !listenable.length
+    ? `<p class="mono" style="color:var(--faint);font-size:13px">${h('unknownServers')}</p>`
+    : `<div><label class="lab" for="sq">${h('sourcesChannels')}</label><div class="pickhead"><input class="inp" id="sq" placeholder="${h('searchSources')}" value="${esc(e.q)}"><span class="selc">${h(e.ids.size === 1 ? 'channelCountOne' : 'channelCountMany', [e.ids.size])}</span></div><div class="srccards">${cards || `<p class="mono" style="color:var(--faint);font-size:13px">${h('noSearchMatches')}</p>`}</div></div>`;
   const html = `<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sht">
-    <div class="sh-head"><h2 id="sht">${e.isNew ? 'Nueva colección' : 'Editar colección'}</h2><p>${t.all ? 'Esta colección incluye siempre todas tus fuentes y canales, también los nuevos.' : 'Elige qué canales lees aquí. Lo que no esté en ninguna colección no se guarda.'}</p>
-      <button class="iconbtn x" id="sclose" aria-label="Cerrar">${I.x.replace(/12px/g, '16px')}</button></div>
+    <div class="sh-head"><h2 id="sht">${e.isNew ? t('newCollection') : t('editCollection')}</h2><p>${c.all ? t('allCollectionDescription') : t('collectionDescription')}</p>
+      <button class="iconbtn x" id="sclose" aria-label="${h('close')}">${I.x.replace(/12px/g, '16px')}</button></div>
     <div class="sh-body">
-      <div><label class="lab" for="cname">Nombre</label><div class="namerow"><button class="emo" id="emo" title="Cambiar icono" aria-label="Cambiar icono">${esc(e.emoji)}</button><input class="inp" id="cname" maxlength="40" value="${esc(e.name)}"></div></div>
+      <div><label class="lab" for="cname">${h('name')}</label><div class="namerow"><button class="emo" id="emo" title="${h('changeIcon')}" aria-label="${h('changeIcon')}">${esc(e.emoji)}</button><input class="inp" id="cname" maxlength="40" value="${esc(e.name)}"></div></div>
       ${picker}
     </div>
-    <div class="sh-foot">${e.isNew ? '' : '<button class="btn danger" id="sdel">Eliminar</button>'}<span class="grow"></span><button class="btn ghost" id="scancel">Cancelar</button><button class="btn primary" id="sdone">Listo</button></div>
+    <div class="sh-foot">${e.isNew ? '' : `<button class="btn danger" id="sdel">${h('delete')}</button>`}<span class="grow"></span><button class="btn ghost" id="scancel">${h('cancel')}</button><button class="btn primary" id="sdone">${h('done')}</button></div>
   </div></div>`;
   const old = $('#scrim');
   if (old) {
@@ -347,16 +366,16 @@ document.addEventListener('click', async (ev) => {
   if (!b) return;
   const e = ui.edit;
   if (b.id === 'menubtn') { menu.hidden = !menu.hidden; b.ariaExpanded = String(!menu.hidden); }
-  else if (b.dataset.tray) { ui.tray = b.dataset.tray; ui.src = ui.conv = ui.q = ''; render(); }
+  else if (b.dataset.collection) { ui.collection = b.dataset.collection; ui.src = ui.conv = ui.q = ''; await refresh(true); }
   else if (b.dataset.src) { ui.src = ui.src === b.dataset.src ? '' : b.dataset.src; ui.conv = ''; render(); }
   else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; ui.hover = null; renderRiver(); }
   else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
-  else if (b.id === 'markread') { tray().readAt = Date.now(); await saveTrays(); toast('Marcado como leído aquí. En Discord no cambia nada.'); }
+  else if (b.id === 'markread') { collection().readAt = Date.now(); await saveCollections(); toast(t('readHere')); }
   else if (b.id === 'themebtn') store.set({ theme: isDark() ? 'light' : 'dark' });
   else if (b.id === 'edit' || b.id === 'emptyedit') openEdit(false);
   else if (b.id === 'add' || b.id === 'add2') {
-    const t = { id: `t${Date.now()}`, name: 'Nueva colección', emoji: '📁', all: false, ids: [], seen: [], readAt: 0 };
-    S.trays.push(t); ui.tray = t.id; ui.src = ui.conv = ui.q = ''; render(); openEdit(true);
+    const c = { id: `c${Date.now()}`, name: t('newCollection'), emoji: '📁', all: false, ids: [], seen: [], readAt: 0 };
+    S.collections.push(c); ui.collection = c.id; ui.src = ui.conv = ui.q = ''; render(); openEdit(true);
   }
   else if (e && b.dataset.pill) { e.ids.has(b.dataset.pill) ? e.ids.delete(b.dataset.pill) : e.ids.add(b.dataset.pill); drawSheet(); }
   else if (e && (b.dataset.cat || b.dataset.all)) {
@@ -367,32 +386,32 @@ document.addEventListener('click', async (ev) => {
   }
   else if (e && b.id === 'emo') { e.name = $('#cname').value; e.emoji = EMOJIS[(EMOJIS.indexOf(e.emoji) + 1) % EMOJIS.length]; drawSheet(); }
   else if (b.id === 'sclose' || b.id === 'scancel') {
-    if (e?.isNew) { S.trays = S.trays.filter((t) => t.id !== ui.tray); ui.tray = S.trays[0]?.id ?? null; }
-    closeSheet(); render();
+    if (e?.isNew) { S.collections = S.collections.filter((c) => c.id !== ui.collection); ui.collection = S.collections[0]?.id ?? null; }
+    closeSheet(); await refresh(true);
   }
   else if (b.id === 'sdone') {
-    const t = tray();
-    t.name = $('#cname').value.trim() || 'Sin nombre';
-    t.emoji = e.emoji;
-    if (!t.all) { t.ids = [...e.ids]; t.seen = channelIdsOf(() => true); }
+    const c = collection();
+    c.name = $('#cname').value.trim() || t('unnamed');
+    c.emoji = e.emoji;
+    if (!c.all) { c.ids = [...e.ids]; c.seen = channelIdsOf(() => true); }
     closeSheet();
-    await saveTrays();
-    toast(`«${t.name}» lista`);
+    await saveCollections();
+    toast(t('collectionReady', [c.name]));
   }
   else if (b.id === 'sdel') {
-    const t = tray();
-    if (!confirm(`¿Eliminar la colección «${t.name}»? Los mensajes guardados no se borran.`)) return;
-    S.trays = S.trays.filter((x) => x.id !== t.id); ui.tray = S.trays[0]?.id ?? null;
-    closeSheet(); await saveTrays();
+    const c = collection();
+    if (!confirm(t('deleteCollection', [c.name]))) return;
+    S.collections = S.collections.filter((x) => x.id !== c.id); ui.collection = S.collections[0]?.id ?? null;
+    closeSheet(); await saveCollections();
   }
   else if (b.id === 'clean') {
-    const out = S.msgs.filter((m) => !S.trays.some((t) => inTray(t, m)));
-    if (!out.length) return toast('No hay mensajes fuera de las colecciones.');
-    if (confirm(`¿Borrar ${out.length} mensajes de canales que no están en ninguna colección?`)) await store.remove(out.map((m) => `m:${m.id}`));
+    const count = await feedDB.outside(S.collections, S.chans);
+    if (!count) return toast(t('noOutside'));
+    if (confirm(t('deleteOutside', [count]))) await command('clean');
   }
   else if (b.id === 'wipe') {
-    if (!confirm('¿Borrar todos los mensajes capturados? Las colecciones se conservan.')) return;
-    await store.remove(Object.keys(await store.get(null)).filter((k) => /^[me]:|^lastSignal$/.test(k)));
+    if (!confirm(t('wipeConfirm'))) return;
+    await command('wipe');
   }
 });
 document.addEventListener('input', (ev) => {
@@ -415,8 +434,23 @@ document.addEventListener('mouseover', (ev) => {
   if (k !== ui.hover) { ui.hover = k; applyHover(); }
 });
 
-let timer;
-const refresh = async () => { await load(); render(); };
-store.onChanged.addListener(() => { clearTimeout(timer); timer = setTimeout(refresh, 400); });
-setInterval(renderSide, 30e3); // keeps "hace X s" and the no-signal warning honest
+const command = async (kind) => {
+  const result = await api.runtime.sendMessage({ kind });
+  if (result?.error) throw new Error(result.error);
+};
+let refreshing = Promise.resolve();
+const refresh = (force = false) => {
+  refreshing = refreshing.then(async () => { if (await load(force)) render(); })
+    .catch((error) => console.error('[discord-feed]', error));
+  return refreshing;
+};
+store.onChanged.addListener((changes) => {
+  if (['rev', 'collections', 'theme'].some((key) => key in changes)) refresh();
+});
+setInterval(renderSide, 30e3); // keeps relative time and the no-signal warning honest
+for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
+for (const attribute of ['title', 'aria-label']) {
+  for (const element of document.querySelectorAll(`[data-i18n-${attribute}]`)) element.setAttribute(attribute, t(element.getAttribute(`data-i18n-${attribute}`)));
+}
+document.documentElement.lang = api.i18n.getUILanguage();
 refresh();

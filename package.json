@@ -1,0 +1,13 @@
+{
+  "name": "discord-feed-extension",
+  "private": true,
+  "version": "0.1.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "npm run build && node test/e2e/chrome.mjs && node test/e2e/viewer.mjs",
+    "build": "node scripts/build.mjs",
+    "lint": "npx web-ext lint --source-dir dist/firefox"
+  },
+  "devDependencies": { "playwright": "^1.56.0" }
+}

@@ -1,456 +1,503 @@
-// Reader UI, ported from design/prototype.html onto the extension's storage.
-// IndexedDB holds records; storage.local holds collections, revisions and settings.
+// Local reader. All content is constructed as DOM nodes, including message formatting.
 const api = globalThis.browser ?? chrome;
 const store = api.storage.local;
 const t = (key, substitutions = []) => api.i18n.getMessage(key, substitutions.map(String));
-const h = (key, substitutions) => esc(t(key, substitutions));
-const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmtFull = (c) => new Date(c).toLocaleString();
-const hm = (c) => new Date(c).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-// golden-angle spread so neighbouring ids (snowflakes created close together) still get distinct colours
-const hue = (id) => Math.round(([...String(id)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) * 137.508) % 360);
-const THREAD_TYPES = [10, 11, 12];
-const NOT_LISTENABLE = [4, ...THREAD_TYPES]; // categories; threads follow their parent channel
-const MAX_SHOWN = 400;
-const LANE_COLORS = 6, MAX_LANES = 8;
-const EMOJIS = ['📣', '⭐', '🎨', '🛠️', '🎮', '🔥', '📰', '🧪', '🌐', '💬', '📁'];
-
+const $ = (selector) => document.querySelector(selector);
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (value === undefined || value === null) continue;
+    if (key === 'class') node.className = value;
+    else if (key === 'style') {
+      for (const [property, setting] of Object.entries(value)) {
+        if (property.startsWith('--')) node.style.setProperty(property, setting);
+        else node.style[property] = setting;
+      }
+    }
+    else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+    else if (key === 'value') node.value = value;
+    else node.setAttribute(key, String(value));
+  }
+  node.append(...children.flat(Infinity).filter((child) => child !== null && child !== undefined));
+  return node;
+}
+const button = (text, props = {}) => el('button', { type: 'button', ...props }, text);
+const link = (text, href, props = {}) => safeLink(href) ? el('a', { href: safeLink(href), target: '_blank', rel: 'noopener noreferrer', ...props }, text) : el('span', props, text);
+const fmtFull = (date) => new Date(date).toLocaleString();
+const hm = (date) => new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const THREAD_TYPES = [10, 11, 12], NOT_LISTENABLE = [4, ...THREAD_TYPES], MAX_SHOWN = 400;
+const EMOJIS = ['\u{1f4e3}', '\u2b50', '\u{1f3a8}', '\u{1f6e0}', '\u{1f3ae}', '\u{1f4c1}'];
 let S = { collections: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], stats: {}, buckets: Array(24).fill(0), people: new Map() };
-const ui = { collection: null, src: '', conv: '', q: '', hover: null, edit: null, feedKey: null };
-
+const ui = { collection: null, src: '', conv: '', q: '', hover: null, edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
+const collection = () => S.collections.find((c) => c.id === ui.collection);
+const isThread = (id) => THREAD_TYPES.includes(S.chans[id]?.type);
+const baseChannel = (m) => isThread(m.channel_id) ? S.chans[m.channel_id]?.parent_id : m.channel_id;
+const inCollection = (c, m) => c.all || c.ids.includes(m.channel_id) || c.ids.includes(baseChannel(m));
+const isUnread = (c, m) => Date.parse(m.timestamp) > (c.readAt ?? 0);
+const chanName = (id) => S.chans[id]?.name ?? id;
+const guildName = (id) => S.guilds[id] ?? t('server');
+const emojiOf = (c) => c.emoji ?? (c.all ? '\u{1f310}' : '\u{1f4c1}');
+const isDark = () => S.theme === 'dark' || (S.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+const laneColor = (id) => `var(--l${laneIndex(id)})`;
+const initials = (name) => String(name).split(/\s+/).map((word) => word[0]).join('').slice(0, 2).toUpperCase();
+function imageOrInitial(src, name, cls) {
+  const fallback = () => el('span', { class: cls }, initials(name));
+  return src ? el('img', { class: cls, alt: '', src, onerror: (ev) => ev.target.replaceWith(fallback()) }) : fallback();
+}
+const fav = (id) => imageOrInitial(S.icons[id] ? `https://cdn.discordapp.com/icons/${encodeURIComponent(id)}/${encodeURIComponent(S.icons[id])}.png?size=64` : null, guildName(id), 'fav');
+function avatar(author = {}, guild) {
+  const id = encodeURIComponent(author.id ?? '');
+  let src;
+  if (author.member_avatar) src = `https://cdn.discordapp.com/guilds/${encodeURIComponent(guild)}/users/${id}/avatars/${encodeURIComponent(author.member_avatar)}.png?size=64`;
+  else if (author.avatar) src = `https://cdn.discordapp.com/avatars/${id}/${encodeURIComponent(author.avatar)}.png?size=64`;
+  else { try { src = `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(author.id) >> 22n) % 6n)}.png`; } catch { /* initials */ } }
+  return imageOrInitial(src, author.name ?? '?', 'av');
+}
 let settingsKey, collectionsKey;
 async function load(force = false) {
-  const settings = await store.get(['collections', 'lastSignal', 'theme', 'rev']);
-  const key = JSON.stringify([settings.collections, settings.theme]);
+  const settings = await store.get(['collections', 'lastSignal', 'theme', 'rev', 'health', 'consentedAt', 'retentionDays']);
+  const key = JSON.stringify([settings.collections, settings.theme, settings.health, settings.consentedAt, settings.retentionDays]);
   const revised = S.rev !== settings.rev || settingsKey === undefined;
   if (!force && !revised && key === settingsKey) return false;
   const nextCollectionsKey = JSON.stringify(settings.collections ?? []);
   const changedCollections = collectionsKey !== nextCollectionsKey;
-  // Keep an unsaved collection across incoming capture revisions.
   const pending = ui.edit?.isNew && collection();
   S.collections = settings.collections ?? [];
   if (pending && !S.collections.some((c) => c.id === pending.id)) S.collections.push(pending);
   if (!S.collections.some((c) => c.id === ui.collection)) ui.collection = S.collections[0]?.id ?? null;
-  S.lastSignal = settings.lastSignal;
-  S.theme = settings.theme ?? 'system';
+  Object.assign(S, { lastSignal: settings.lastSignal, theme: settings.theme ?? 'system', health: settings.health, consentedAt: settings.consentedAt, retentionDays: settings.retentionDays ?? 14 });
   if (revised) {
     const [channels, events] = await Promise.all([feedDB.channels(), feedDB.events(Date.now() - 864e5)]);
-    S.chans = Object.fromEntries(channels.map((c) => [c.id, c]));
-    S.guilds = {}; S.icons = {}; S.events = events;
-    for (const c of channels) {
-      if (c.guild_name) S.guilds[c.guild_id] = c.guild_name;
-      if (c.guild_icon) S.icons[c.guild_id] = c.guild_icon;
-    }
+    S.chans = Object.fromEntries(channels.map((c) => [c.id, c])); S.guilds = {}; S.icons = {}; S.events = events;
+    for (const c of channels) { if (c.guild_name) S.guilds[c.guild_id] = c.guild_name; if (c.guild_icon) S.icons[c.guild_id] = c.guild_icon; }
   }
   if (revised || changedCollections || force) {
-    const [messages, overview] = await Promise.all([
-      feedDB.recent(collection(), S.chans, MAX_SHOWN),
-      feedDB.overview(S.collections, S.chans, Date.now()),
-    ]);
-    S.msgs = messages;
-    S.people = new Map(messages.filter((m) => m.author?.id).map((m) => [m.author.id, m.author.name]));
+    const overview = await feedDB.overview(S.collections, S.chans, Date.now());
     S.stats = overview.stats; S.buckets = overview.buckets;
+    // Include ALL unread predecessors: a latest-400 slice cannot safely advance readAt.
+    if (ui.loadedCollection !== collection()?.id) { ui.loadedCollection = collection()?.id; ui.windowLimit = MAX_SHOWN; ui.fullHistory = false; }
+    ui.windowLimit = Math.max(ui.windowLimit, (S.stats[collection()?.id]?.unread ?? 0) + 50);
+    const limit = ui.fullHistory ? Number.MAX_SAFE_INTEGER : ui.windowLimit;
+    S.msgs = await feedDB.recent(collection(), S.chans, limit);
+    S.people = new Map(S.msgs.filter((m) => m.author?.id).map((m) => [m.author.id, m.author.name]));
   }
   S.rev = settings.rev; settingsKey = key; collectionsKey = nextCollectionsKey;
   return true;
 }
-
-const collection = () => S.collections.find((c) => c.id === ui.collection);
-const saveCollections = () => store.set({ collections: S.collections });
-const isThread = (id) => THREAD_TYPES.includes(S.chans[id]?.type);
-const baseChannel = (m) => (isThread(m.channel_id) ? S.chans[m.channel_id].parent_id : m.channel_id);
-const inCollection = (c, m) => c.all || c.ids.includes(m.channel_id) || c.ids.includes(baseChannel(m));
-const isUnread = (c, m) => Date.parse(m.timestamp) > (c.readAt ?? 0);
-const chanName = (id) => S.chans[id]?.name ?? id;
-const emojiOf = (c) => c.emoji ?? (c.all ? '🌐' : '📁');
-const guildName = (g) => S.guilds[g] ?? t('server');
-const initials = (name) => name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-const isDark = () => (S.theme === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : S.theme === 'dark');
-
-// Server icon from Discord's CDN; coloured initials when there is none or it fails to load.
-const fav = (g, cls = 'fav') => S.icons[g]
-  ? `<img class="${cls}" alt="" src="${esc(`https://cdn.discordapp.com/icons/${g}/${S.icons[g]}.png?size=64`)}" data-fallback="${esc(initials(guildName(g)))}" style="background:hsl(${hue(g)} 50% 48%)">`
-  : `<span class="${cls}" style="background:hsl(${hue(g)} 50% 48%)">${esc(initials(guildName(g)))}</span>`;
-// Author avatar like Discord picks it: per-server avatar, else profile avatar, else Discord's default avatar.
-const avatarUrl = (a, g) => {
-  if (a.member_avatar) return `https://cdn.discordapp.com/guilds/${g}/users/${a.id}/avatars/${a.member_avatar}.png?size=64`;
-  if (a.avatar) return `https://cdn.discordapp.com/avatars/${a.id}/${a.avatar}.png?size=64`;
-  try { return `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(a.id) >> 22n) % 6n)}.png`; } catch { return null; }
-};
-const avatar = (a, g) => {
-  const src = a?.id && avatarUrl(a, g);
-  const style = `--h:${hue(a?.id ?? a?.name)}`;
-  const letter = esc((a?.name ?? '?')[0].toUpperCase());
-  return src ? `<img class="av" alt="" src="${esc(src)}" data-fallback="${letter}" style="${style}">` : `<span class="av" style="${style}">${letter}</span>`;
-};
-// Broken CDN images fall back to their initials (error events don't bubble, so listen in the capture phase).
-document.addEventListener('error', (e) => {
-  const img = e.target;
-  if (img.tagName !== 'IMG' || !img.dataset.fallback) return;
-  console.warn('[discord-feed] image failed to load:', img.src);
-  const span = document.createElement('span');
-  span.className = img.className; span.style.cssText = img.style.cssText; span.textContent = img.dataset.fallback;
-  img.replaceWith(span);
-}, true);
-
-// Message text: escape first, then render Discord's markup tokens.
-const richText = (s) => esc(s)
-  .replace(/&lt;a?(:\w+:)\d+&gt;/g, '$1')
-  .replace(/&lt;@!?(\d+)&gt;/g, (_, id) => `<span class="ment">@${esc(S.people.get(id) ?? t('mention'))}</span>`)
-  .replace(/&lt;@&amp;\d+&gt;/g, `<span class="ment">@${h('role')}</span>`)
-  .replace(/&lt;#(\d+)&gt;/g, (_, id) => `<span class="ment">#${esc(chanName(id))}</span>`)
-  .replace(/@(everyone|here)\b/g, '<span class="ment">@$1</span>');
-
-const I = {
-  pen: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
-  plus: '<svg class="ic" style="width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
-  x: '<svg class="ic" style="width:12px;height:12px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
-  search: '<svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
-  ext: '<svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>',
-  focus: '<svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M3 12h4M17 12h4M12 3v4M12 17v4"/></svg>',
-  sun: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
-  moon: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>',
-  check: '<svg class="ic" style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>',
-};
-
-/* ---------------- sidebar ---------------- */
-function renderSide() {
-  const c = collection();
-  const unreadIn = (x, guild) => guild ? S.stats[x.id]?.guilds[guild] ?? 0 : S.stats[x.id]?.unread ?? 0;
-  let html = `<div class="group"><span>${h('collections')}</span><button id="add" aria-label="${h('newCollection')}" title="${h('newCollection')}">${I.plus}</button></div>`
-    + S.collections.map((x) => {
-      const n = unreadIn(x);
-      return `<button class="item ${x.id === ui.collection ? 'on' : ''} ${n ? 'unread' : ''}" data-collection="${esc(x.id)}"><span class="em">${esc(emojiOf(x))}</span><span class="nm">${esc(x.name)}</span><span class="n">${n > 999 ? '999+' : n || ''}</span></button>`;
-    }).join('');
-  if (c) {
-    const srcs = Object.keys(S.stats[c.id]?.guilds ?? {}).sort((a, b) => guildName(a).localeCompare(guildName(b)));
-    if (ui.src && !srcs.includes(ui.src)) ui.src = '';
-    if (srcs.length) html += `<div class="group"><span>${h('sourcesIn', [c.name])}</span></div>` + srcs.map((g) => {
-      const n = unreadIn(c, g);
-      return `<button class="item ${ui.src === g ? 'on' : ''} ${n ? 'unread' : ''}" data-src="${esc(g)}">${fav(g)}<span class="nm">${esc(guildName(g))}</span><span class="n">${n || ''}</span></button>`;
-    }).join('');
-  }
-  $('#side').innerHTML = html;
-
-  // Listening status + 24 h coverage: one bar per hour, height = messages captured, red = a known gap.
+const saveCollections = () => store.set({ collections: S.collections.filter((c) => !(ui.edit?.isNew && c.id === ui.collection)) });
+function gapTargets(gap) { return typeof recoveryTargets === 'function' ? recoveryTargets(gap, S.collections, S.chans) : []; }
+function gapCovered(gap) {
+  const ids = Object.values(S.chans).filter((ch) => !NOT_LISTENABLE.includes(ch.type) && S.collections.some((c) => c.all || c.ids.includes(ch.id))).map((ch) => ch.id);
+  return typeof isGapCovered === 'function' ? isGapCovered(gap, ids) : ids.length > 0 && ids.every((id) => gap.covered?.[id]);
+}
+function renderStatus() {
   const age = S.lastSignal ? (Date.now() - S.lastSignal) / 1000 : Infinity;
-  const live = age <= 180;
-  const now = Date.now(), H = 3600e3;
-  const buckets = S.buckets;
-  const gaps = S.events.filter((e) => e.type === 'gap' && e.to > now - 24 * H);
-  const inGap = (i) => gaps.some((g) => g.from < now - (23 - i) * H && g.to > now - (24 - i) * H);
-  const max = Math.max(1, ...buckets);
-  const lastGap = [...gaps].sort((a, b) => b.to - a.to)[0];
+  const state = S.health?.state ?? (!S.consentedAt ? 'not-consented' : age <= 180 ? 'ok' : 'no-tab');
+  const keys = { ok: 'healthOk', 'no-tab': 'healthNoTab', broken: 'healthBroken', 'multi-tab': 'healthMultiTab', 'not-consented': 'healthNotConsented' };
+  const status = $('#status'); status.className = `status ${state === 'ok' ? '' : 'off'}`;
   const ageLabel = !S.lastSignal ? t('never') : age < 60 ? t('secondsAgo', [Math.max(1, Math.round(age))]) : age < 3600 ? t('minutesAgo', [Math.round(age / 60)]) : fmtFull(S.lastSignal);
-  $('#status').className = `status ${live ? '' : 'off'}`;
-  $('#status').innerHTML = `<div class="row"><span class="pulse"></span><b>${live ? t('listening') : t('noSignal')}</b><small>${ageLabel}</small></div>
-    ${live ? '' : `<div class="warnline">${S.lastSignal ? t('noResponse') : t('openDiscord')}</div>`}
-    <div class="spark" title="${h('hourlyCapture')}">${buckets.map((n, i) => (inGap(i) ? '<i class="gap"></i>' : n ? `<i style="height:${10 + (n / max) * 90}%"></i>` : '<i class="none"></i>')).join('')}</div>
-    <div class="legend"><span>${h('dayAgo')}</span>${lastGap ? `<span class="g" title="${h('gapRange', [fmtFull(lastGap.from), fmtFull(lastGap.to)])}">${h('gapAt', [hm(lastGap.from)])}</span>` : `<span>${h('noGaps')}</span>`}<span>${h('now')}</span></div>`;
+  status.replaceChildren(el('div', { class: 'row' }, el('span', { class: 'pulse' }), el('b', {}, t(state === 'ok' ? 'listening' : 'noSignal')), el('small', {}, ageLabel)), el('p', { class: 'health-copy' }, t(keys[state] ?? 'healthBroken')));
+  if (state === 'not-consented') status.append(button(t('welcome'), { class: 'textbtn', onclick: () => showWelcome() }));
+  if (state === 'no-tab') status.append(link(t('openDiscordStep'), 'https://discord.com/app'));
+  const gaps = S.events.filter((e) => e.type === 'gap' && (e.to ?? e.at) > Date.now() - 864e5);
+  const max = Math.max(1, ...S.buckets);
+  status.append(el('div', { class: 'spark', title: t('hourlyCapture') }, S.buckets.map((n, i) => {
+    const gap = gaps.find((g) => g.from < Date.now() - (23 - i) * 36e5 && g.to > Date.now() - (24 - i) * 36e5);
+    return el('i', { class: gap ? gapCovered(gap) ? 'covered' : 'gap' : n ? '' : 'none', style: { height: `${10 + n / max * 90}%` } });
+  })), el('div', { class: 'legend' }, t('dayAgo'), el('span', {}, t(gaps.length ? 'coverageGaps' : 'noGaps')), t('now')));
+  for (const gap of gaps) {
+    const covered = gapCovered(gap);
+    const row = el('div', { class: `gap-row ${covered ? 'covered' : ''}` }, el('span', { title: t('gapRange', [fmtFull(gap.from), fmtFull(gap.to)]) }, t('gapAt', [hm(gap.from)])));
+    if (covered) row.append(el('span', {}, t('gapCovered')));
+    else row.append(button(t('recover'), { class: 'textbtn', onclick: () => showRecovery(gap) }));
+    status.append(row);
+  }
+  if ($('#guide-signal')) { $('#guide-signal').textContent = t(state === 'ok' ? 'greenSignal' : 'waitSignal'); $('#guide-signal').classList.toggle('covered', state === 'ok'); }
 }
-
-/* ---------------- header ---------------- */
-function renderHead(c, list, convs) {
-  const n = list.filter((m) => isUnread(c, m)).length;
-  const chans = c.ids.length;
-  const srcN = new Set(c.ids.map((id) => S.chans[id]?.guild_id).filter(Boolean)).size;
-  const chips = [];
-  if (ui.src) chips.push(`<span class="chipf">${fav(ui.src)}<span>${esc(guildName(ui.src))}</span><button data-clear="src" aria-label="${h('removeFilter')}">${I.x}</button></span>`);
-  if (ui.conv && convs.has(ui.conv)) chips.push(`<span class="chipf"><span class="sw" style="background:${laneColor(ui.conv)}"></span><span>${esc(convs.get(ui.conv).title)}</span><button data-clear="conv" aria-label="${h('removeFilter')}">${I.x}</button></span>`);
-  if (ui.q) chips.push(`<span class="chipf"><span>“${esc(ui.q)}”</span><button data-clear="q" aria-label="${h('clearSearch')}">${I.x}</button></span>`);
-  const hadFocus = document.activeElement?.id === 'q';
-  $('#head').innerHTML = `<div class="titlerow"><span class="em">${esc(emojiOf(c))}</span><h1>${esc(c.name)}</h1><button class="iconbtn" id="edit" aria-label="${h('editCollection')}" title="${h('editCollection')}">${I.pen}</button>
-      <span class="grow"></span><label class="search">${I.search}<input id="q" placeholder="${h('searchIn', [c.name])}" value="${esc(ui.q)}" aria-label="${h('search')}"></label>
-      <button class="iconbtn" id="themebtn" aria-label="${h('changeTheme')}" title="${h('changeTheme')}">${isDark() ? I.sun : I.moon}</button></div>
-    <div class="subrow">${n ? `<span class="newpill">${h(n === 1 ? 'newCountOne' : 'newCountMany', [n])}</span>` : `<span class="mono" style="font-size:12px">${h('upToDate')}</span>`}
-      <span>${c.all ? t('allSources') : `${t(chans === 1 ? 'channelCountOne' : 'channelCountMany', [chans])} · ${t(srcN === 1 ? 'sourceCountOne' : 'sourceCountMany', [srcN])}`}</span>
-      ${chips.join('')}<span class="grow"></span>${n ? `<button class="textbtn" id="markread">${h('markRead')}</button>` : ''}</div>`;
-  if (hadFocus) { const i = $('#q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
-}
-
-/* ---------------- river with conversation lanes ---------------- */
-let laneIdx = new Map();
-const laneColor = (k) => `var(--l${(laneIdx.get(k) ?? 0) % LANE_COLORS})`;
-
-function renderRiver() {
+function renderSide() {
+  const side = $('#side');
+  side.replaceChildren(el('div', { class: 'group' }, el('span', {}, t('collections')), button('+', { id: 'add', 'aria-label': t('newCollection'), title: t('newCollection') })));
+  for (const c of S.collections) {
+    const n = S.stats[c.id]?.unread ?? 0;
+    side.append(button([el('span', { class: 'em' }, emojiOf(c)), el('span', { class: 'nm' }, c.name), el('span', { class: 'n' }, n > 999 ? '999+' : n || '')], { class: `item ${c.id === ui.collection ? 'on' : ''} ${n ? 'unread' : ''}`, 'data-collection': c.id }));
+  }
   const c = collection();
-  if (!c) {
-    $('#head').innerHTML = '';
-    $('#scroll').innerHTML = `<div class="empty"><h2>${h('noCollections')}</h2><p>${h('createCollectionHint')}</p><button class="btn primary" id="add2">${h('newCollection')}</button></div>`;
-    return;
+  if (c) {
+    const sources = Object.keys(S.stats[c.id]?.guilds ?? {}).sort((a, b) => guildName(a).localeCompare(guildName(b)));
+    if (ui.src && !sources.includes(ui.src)) ui.src = '';
+    if (sources.length) side.append(el('div', { class: 'group' }, t('sourcesIn', [c.name])));
+    for (const id of sources) side.append(button([fav(id), el('span', { class: 'nm' }, guildName(id)), el('span', { class: 'n' }, S.stats[c.id]?.guilds[id] || '')], { class: `item ${ui.src === id ? 'on' : ''}`, 'data-src': id }));
   }
+  renderStatus();
+}
+function renderHead(c, list) {
+  const focus = document.activeElement?.id === 'q';
+  const selection = focus ? [$('#q').selectionStart, $('#q').selectionEnd] : null;
+  const n = list.filter((m) => isUnread(c, m)).length;
+  const sources = new Set(c.ids.map((id) => S.chans[id]?.guild_id).filter(Boolean)).size;
+  const sub = el('div', { class: 'subrow' }, el('span', { class: n ? 'newpill' : 'mono' }, n ? t(n === 1 ? 'newCountOne' : 'newCountMany', [n]) : t('upToDate')),
+    el('span', {}, c.all ? t('allSources') : `${t(c.ids.length === 1 ? 'channelCountOne' : 'channelCountMany', [c.ids.length])} \u00b7 ${t(sources === 1 ? 'sourceCountOne' : 'sourceCountMany', [sources])}`));
+  for (const [key, value] of [['src', ui.src && guildName(ui.src)], ['conv', ui.conv && `#${chanName(ui.conv)}`], ['q', ui.q]]) {
+    if (value) sub.append(el('span', { class: 'chipf' }, el('span', {}, value), button('\u00d7', { 'data-clear': key, 'aria-label': t(key === 'q' ? 'clearSearch' : 'removeFilter') })));
+  }
+  sub.append(el('span', { class: 'grow' }), button(t('markRead'), { class: 'textbtn', id: 'markread' }));
+  $('#head').replaceChildren(el('div', { class: 'titlerow' }, el('span', { class: 'em' }, emojiOf(c)), el('h1', {}, c.name), button('\u270e', { class: 'iconbtn', id: 'edit', 'aria-label': t('editCollection'), title: t('editCollection') }), el('span', { class: 'grow' }),
+    el('label', { class: 'search' }, el('input', { id: 'q', placeholder: t('searchIn', [c.name]), value: ui.q, 'aria-label': t('search') })), button(isDark() ? '\u2600' : '\u263e', { class: 'iconbtn', id: 'themebtn', 'aria-label': t('changeTheme'), title: t('changeTheme') }), button('\u22ef', { class: 'iconbtn', id: 'mobilemenu', 'aria-label': t('settings') })), sub);
+  if (focus) { $('#q').focus(); $('#q').setSelectionRange(...selection); }
+}
+function richNodes(tokens) {
+  return tokens.map((token) => {
+    if (token.type === 'text') return document.createTextNode(token.text);
+    if (token.type === 'discord') {
+      const value = token.text;
+      if (/^a?:/.test(value)) return document.createTextNode(`:${value.split(':')[1]}:`);
+      const name = value.startsWith('#') ? `#${chanName(value.slice(1))}` : value.startsWith('@&') ? `@${t('role')}` : /^@!?\d/.test(value) ? `@${S.people.get(value.replace(/^@!?/, '')) ?? t('mention')}` : `@${value}`;
+      return el('span', { class: 'ment' }, name);
+    }
+    if (token.type === 'link') return link(richNodes(token.children), token.href);
+    if (token.type === 'spoiler') {
+      const reveal = (event) => { const node = event.currentTarget; node.classList.add('revealed'); node.setAttribute('aria-expanded', 'true'); node.removeAttribute('aria-label'); };
+      return el('span', { role: 'button', tabindex: '0', class: 'spoiler', 'aria-label': t('revealSpoiler'), 'aria-expanded': 'false', onclick: reveal, onkeydown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); reveal(event); } } }, richNodes(token.children));
+    }
+    if (token.type === 'pre') return el('pre', {}, el('code', {}, token.text));
+    if (token.type === 'code') return el('code', {}, token.text);
+    return el(token.type, {}, richNodes(token.children));
+  });
+}
+function attachment(file) {
+  const name = file.filename ?? t('fileType');
+  const card = () => link([el('span', { class: 'ft' }, name.split('.').pop().slice(0, 4).toUpperCase()), el('div', {}, name, el('small', {}, t('notAnalyzed')))], file.url, { class: 'file' });
+  if (!file.content_type?.startsWith('image/') || !safeLink(file.url)) return card();
+  // Only Discord CDN images are loaded automatically; other URLs remain file links.
+  const cdn = (value) => { const url = safeLink(value); return url && /^(?:cdn|media)\.discordapp\.(?:com|net)$/.test(new URL(url).hostname) ? url : null; };
+  const original = cdn(file.url), proxy = cdn(file.proxy_url);
+  if (!proxy && !original) return card();
+  const src = new URL(proxy ?? original); src.searchParams.set('width', '320'); src.searchParams.set('height', '240');
+  const image = el('img', { src: src.href, alt: name, loading: 'lazy', class: 'thumbnail', width: Math.min(file.width || 320, 320), onerror: () => {
+    if (original && image.dataset.fallback !== 'original') { image.dataset.fallback = 'original'; image.src = original; }
+    else image.parentElement.replaceWith(card());
+  } });
+  return link(image, file.url, { class: 'image-attachment' });
+}
+function messageNode(m, index, total, c) {
+  const reply = S.msgs.find((x) => x.id === m.reply_to);
+  const href = `https://discord.com/channels/${encodeURIComponent(m.guild_id)}/${encodeURIComponent(m.channel_id)}/${encodeURIComponent(m.id)}`;
+  const header = el('div', { class: 'h' }, el('span', { class: 'who' }, m.author?.name ?? '?'), el('time', { class: 't', title: fmtFull(m.timestamp), datetime: m.timestamp }, hm(m.timestamp)), link([fav(m.guild_id), `#${chanName(m.channel_id)}`], href, { class: 'where', title: t('openInDiscord') }));
+  if (m.reply_to) header.append(el('span', { class: 're' }, `\u21b3 ${reply?.author?.name ?? t('reply')}`));
+  if (m.edited_timestamp) header.append(el('span', { class: 'tag' }, t('edited')));
+  if (m.deleted_at) header.append(el('span', { class: 'tag' }, t('deleted')));
+  const body = el('div', {}, header, el('div', { class: 'txt' }, richNodes(markdownTokens(m.content))));
+  const extras = [...(m.stickers ?? []).map((s) => t('stickerLabel', [s])), m.embeds ? t('embedCount', [m.embeds]) : ''].filter(Boolean);
+  if (extras.length) body.append(el('div', { class: 'tag' }, extras.join(' \u00b7 ')));
+  body.append(...(m.attachments ?? []).map(attachment));
+  return el('article', { class: `entry ${isUnread(c, m) ? 'unread' : ''} ${m.deleted_at ? 'deleted' : ''}`, tabindex: '0', 'data-c': m.channel_id, 'data-id': m.id, 'aria-posinset': index + 1, 'aria-setsize': total }, avatar(m.author, m.guild_id), body,
+    el('div', { class: 'tools' }, button('\u25ce', { 'data-focus': m.channel_id, 'aria-label': t('focusChannel'), title: t('focusChannel') }), link('\u2197', href, { 'aria-label': t('openInDiscord'), title: t('openInDiscord') })));
+}
+let riverResize;
+function renderRiver() {
+  const c = collection(), scroll = $('#scroll');
+  const focusedId = document.activeElement?.closest('.entry')?.dataset.id;
+  if (!c) { $('#head').replaceChildren(); scroll.replaceChildren(el('div', { class: 'empty' }, el('h2', {}, t('noCollections')), el('p', {}, t('createCollectionHint')), button(t('newCollection'), { class: 'btn primary', id: 'add2' }))); return; }
+  const key = JSON.stringify([c.id, ui.src, ui.conv, ui.q]);
+  const changed = key !== ui.feedKey;
+  if (changed) { ui.expanded = false; ui.seen.clear(); ui.visibleSince.clear(); ui.openReadAt = c.readAt ?? 0; }
   const all = S.msgs.filter((m) => inCollection(c, m));
-  const { convOf, convs } = assignConversations(all, { isThread, threadName: (id) => S.chans[id]?.name, noText: t('noText') });
   const q = ui.q.toLowerCase();
-  if (ui.conv && !convs.has(ui.conv)) ui.conv = '';
-  const filtered = all.filter((m) => (!ui.src || m.guild_id === ui.src) && (!ui.conv || convOf.get(m.id) === ui.conv)
-    && (!q || `${m.content ?? ''} ${m.author?.name ?? ''}`.toLowerCase().includes(q)))
-    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
-  const list = filtered.slice(-MAX_SHOWN);
-
-  // git-graph lane allocation over the visible list: a conversation holds a lane from its first to its last visible message
-  const first = new Map(), last = new Map();
-  list.forEach((m, i) => { const k = convOf.get(m.id); if (!first.has(k)) first.set(k, i); last.set(k, i); });
-  laneIdx = new Map([...first.keys()].map((k, i) => [k, i]));
-  renderHead(c, list, convs);
-
-  if (!c.all && !c.ids.length) {
-    $('#scroll').innerHTML = `<div class="empty"><svg width="96" height="72" viewBox="0 0 96 72" fill="none" stroke="currentColor" stroke-width="2" opacity=".5"><path d="M10 60c20 0 26-48 46-48s20 30 30 30"/><path d="M10 60c12 0 18-20 34-20s22 20 42 20"/><circle cx="10" cy="60" r="4"/><circle cx="86" cy="42" r="4"/></svg>
-      <h2>${h('emptyCollection')}</h2><p>${h('chooseSourcesHint')}</p><button class="btn primary" id="emptyedit">${h('chooseChannels')}</button></div>`;
-    ui.feedKey = null;
-    return;
-  }
+  const filtered = all.filter((m) => (!ui.src || m.guild_id === ui.src) && (!ui.conv || m.channel_id === ui.conv) && (!q || `${m.content ?? ''} ${m.author?.name ?? ''}`.toLowerCase().includes(q)));
+  const order = readingOrder(filtered, ui.openReadAt ?? c.readAt ?? 0, ui.expanded);
+  const list = order.visible;
+  renderHead(c, filtered);
+  const keep = scroll.scrollTop;
   if (!list.length) {
-    $('#scroll').innerHTML = all.length
-      ? `<div class="empty"><h2>${h('nothingHere')}</h2><p>${h('noMatches')}</p></div>`
-      : `<div class="empty"><h2>${h('noMessages')}</h2><p>${h('messagesHint')}</p></div>`;
-    ui.feedKey = null;
-    return;
+    scroll.replaceChildren(el('div', { class: 'empty' }, el('h2', {}, t(!c.all && !c.ids.length ? 'emptyCollection' : all.length ? 'nothingHere' : 'noMessages')), el('p', {}, t(!c.all && !c.ids.length ? 'chooseSourcesHint' : all.length ? 'noMatches' : 'messagesHint')), ...(!c.all && !c.ids.length ? [button(t('chooseChannels'), { class: 'btn primary', id: 'emptyedit' })] : [])));
+    ui.feedKey = key; return;
   }
-  const lane = new Map(), busy = [];
-  list.forEach((m, i) => {
-    const k = convOf.get(m.id);
-    if (first.get(k) === i) {
-      let l = busy.findIndex((x) => !x);
-      if (l < 0) l = busy.length;
-      l = Math.min(l, MAX_LANES - 1); // ponytail: beyond MAX_LANES concurrent conversations the last lane is shared
-      busy[l] = k; lane.set(k, l);
-    }
-    if (last.get(k) === i && busy[lane.get(k)] === k) busy[lane.get(k)] = null;
+  const { convs, replies } = assignConversations(list, { isThread, channelName: chanName, threadName: chanName, parentId: (id) => S.chans[id]?.parent_id });
+  // Every channel keeps its own lane. Narrow screens compress spacing instead of merging lanes.
+  const laneIds = [...new Set([...convs.keys(), ...[...convs.values()].map((lane) => lane.parent_id).filter(Boolean)])].sort((a, b) => {
+    if (a === b) return 0;
+    const parentA = convs.get(a)?.parent_id ?? a, parentB = convs.get(b)?.parent_id ?? b;
+    return parentA.localeCompare(parentB) || (a === parentA ? -1 : b === parentB ? 1 : a.localeCompare(b));
   });
-  const gut = 30 + (Math.max(...lane.values()) + 1) * 16;
-
-  let html = (S.stats[c.id]?.total ?? 0) > MAX_SHOWN ? `<div class="more">${h('recentLimit', [MAX_SHOWN, S.stats[c.id]?.total ?? filtered.length])}</div>` : '';
-  let lastDay = '';
-  const today = new Date().toDateString(), yesterday = new Date(Date.now() - 864e5).toDateString();
-  list.forEach((m, i) => {
-    const k = convOf.get(m.id), cv = convs.get(k), d = new Date(m.timestamp).toDateString();
-    if (d !== lastDay) { html += `<div class="day">${d === today ? t('today') : d === yesterday ? t('yesterday') : esc(new Date(m.timestamp).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}</div>`; lastDay = d; }
-    const base = baseChannel(m);
-    if (first.get(k) === i) {
-      const n = list.filter((x) => convOf.get(x.id) === k).length;
-      html += `<div class="conv" data-c="${esc(k)}" style="--c:${laneColor(k)}"><button data-focus="${esc(k)}" title="${h('focusConversation')}"><span class="tt">${k.startsWith('thread:') ? t('threadPrefix') : ''}${esc(cv.title)}</span></button>`
-        + `<span class="cm">${h(n === 1 ? 'messageCountOne' : 'messageCountMany', [n])} · #${esc(chanName(base))} · ${esc(guildName(m.guild_id))}</span></div>`;
+  const gap = Math.min(16, 90 / Math.max(1, laneIds.length));
+  const x = (id) => 10 + Math.max(0, laneIds.indexOf(id)) * gap;
+  const gut = Math.ceil(28 + laneIds.length * gap);
+  const river = el('div', { class: 'river', role: 'feed', 'aria-label': t('messageFeed'), style: { '--gut': `${gut}px` } });
+  const earlierCount = !ui.src && !ui.conv && !ui.q ? Math.max(order.earlier.length, (S.stats[c.id]?.total ?? S.msgs.length) - order.unread.length) : order.earlier.length;
+  if (earlierCount && order.unread.length) river.append(button(t('earlierRead', [earlierCount]), { class: 'textbtn earlier', 'aria-expanded': String(ui.expanded), onclick: async () => {
+    const anchor = [...river.querySelectorAll('.entry')].find((entry) => entry.getBoundingClientRect().bottom >= scroll.getBoundingClientRect().top);
+    const id = anchor?.dataset.id, before = anchor?.getBoundingClientRect().top;
+    if (!ui.expanded && !ui.fullHistory) { ui.fullHistory = true; await refresh(true); }
+    ui.expanded = !ui.expanded; renderRiver();
+    const next = [...scroll.querySelectorAll('.entry')].find((entry) => entry.dataset.id === id);
+    if (next) scroll.scrollTop += next.getBoundingClientRect().top - before;
+  } }));
+  if ((S.stats[c.id]?.total ?? 0) > S.msgs.length) river.append(el('div', { class: 'more' }, t('recentLimit', [S.msgs.length, S.stats[c.id].total])));
+  const labels = new Map(), entries = new Map(); let day;
+  list.forEach((m, index) => {
+    const date = new Date(m.timestamp).toDateString();
+    if (date !== day) { day = date; river.append(el('div', { class: 'day' }, date === new Date().toDateString() ? t('today') : date === new Date(Date.now() - 864e5).toDateString() ? t('yesterday') : new Date(m.timestamp).toLocaleDateString())); }
+    if (!labels.has(m.channel_id)) {
+      const label = el('div', { class: 'conv', 'data-c': m.channel_id, style: { '--c': laneColor(m.channel_id) } }, button([fav(m.guild_id), el('span', { class: 'tt' }, `${isThread(m.channel_id) ? t('threadPrefix') : ''}#${chanName(m.channel_id)}`)], { 'data-focus': m.channel_id, title: t('focusChannel') }), el('span', { class: 'cm' }, `${guildName(m.guild_id)}${isThread(m.channel_id) ? ` \u00b7 #${chanName(S.chans[m.channel_id]?.parent_id)}` : ''} \u00b7 ${t(convs.get(m.channel_id).count === 1 ? 'messageCountOne' : 'messageCountMany', [convs.get(m.channel_id).count])}`));
+      labels.set(m.channel_id, label); river.append(label);
     }
-    const reply = m.reply_to && S.msgs.find((x) => x.id === m.reply_to);
-    const link = esc(`https://discord.com/channels/${m.guild_id}/${m.channel_id}/${m.id}`);
-    const files = (m.attachments ?? []).map((a) => `<div class="file"><span class="ft">${esc((a.filename.split('.').pop() || t('fileType')).slice(0, 4).toUpperCase())}</span><div>${esc(a.filename)}<small>${h('notAnalyzed')}</small></div></div>`).join('');
-    const extras = [...(m.stickers ?? []).map((s) => t('stickerLabel', [s])), m.embeds ? t('embedCount', [m.embeds]) : ''].filter(Boolean);
-    html += `<div class="entry ${isUnread(c, m) ? 'unread' : ''} ${m.deleted_at ? 'deleted' : ''}" data-c="${esc(k)}">
-      ${avatar(m.author, m.guild_id)}
-      <div><div class="h"><span class="who">${esc(m.author?.name ?? '?')}</span><span class="t" title="${esc(fmtFull(m.timestamp))}">${hm(m.timestamp)}</span>
-        <a class="where" href="${link}" target="_blank" title="${h('openInDiscord')}">${fav(m.guild_id)}#${esc(chanName(base))}${isThread(m.channel_id) ? ` › ${esc(chanName(m.channel_id))}` : ''}</a>
-        ${reply ? `<span class="re">↳ ${esc(reply.author?.name ?? '')}</span>` : m.reply_to ? `<span class="re">↳ ${h('reply')}</span>` : ''}
-        ${m.edited_timestamp ? `<span class="tag">${h('edited')}</span>` : ''}${m.deleted_at ? `<span class="tag">${h('deleted')}</span>` : ''}</div>
-      ${m.content ? `<div class="txt">${richText(m.content)}</div>` : ''}${extras.length ? `<div class="tag">${esc(extras.join(' · '))}</div>` : ''}${files}</div>
-      <div class="tools"><button data-focus="${esc(k)}" title="${h('focusConversation')}" aria-label="${h('focusConversation')}">${I.focus}</button><a href="${link}" target="_blank" title="${h('openInDiscord')}" aria-label="${h('openInDiscord')}">${I.ext}</a></div></div>`;
+    const entry = messageNode(m, index, list.length, c); entries.set(m.id, entry); river.append(entry);
   });
-  html += `<div class="endcap"><span class="ok">${I.check}</span>${h('feedEnd')}</div>`;
-
-  const sc = $('#scroll');
-  const key = `${c.id}|${ui.src}|${ui.conv}|${ui.q}`;
-  const atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80, keep = sc.scrollTop;
-  sc.innerHTML = `<div class="river" style="--gut:${gut}px">${html}<svg class="graph"></svg></div>`;
-  const river = sc.querySelector('.river'), svg = river.querySelector('svg.graph');
+  river.append(el('div', { class: 'endcap' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '\u2713'), t('feedEnd')));
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'graph'); svg.setAttribute('aria-hidden', 'true'); river.append(svg);
+  scroll.replaceChildren(river);
   const draw = () => {
     if (!river.isConnected) return;
-    const rb = river.getBoundingClientRect();
-    const yOf = (el) => { const r = el.getBoundingClientRect(); return r.top - rb.top + r.height / 2; };
-    const x = (k) => 18 + lane.get(k) * 16;
-    svg.setAttribute('width', gut); svg.setAttribute('height', river.scrollHeight);
-    let out = `<path stroke="var(--line)" d="M6 0 L 6 ${river.scrollHeight}" style="stroke-width:2"/>`;
-    for (const k of first.keys()) {
-      const label = river.querySelector(`.conv[data-c="${CSS.escape(k)}"]`);
-      const nodes = [...river.querySelectorAll(`.entry[data-c="${CSS.escape(k)}"] .av`)];
-      if (!label || !nodes.length) continue;
-      const y0 = yOf(label), y1 = yOf(nodes.at(-1)), stroke = laneColor(k), dk = esc(k);
-      out += `<path data-c="${dk}" stroke="${stroke}" d="M6 ${y0 - 12} C 6 ${y0}, ${x(k)} ${y0 - 6}, ${x(k)} ${y0 + 6} L ${x(k)} ${y1}"/>`;
-      for (const n of nodes) {
-        const y = yOf(n), un = n.closest('.entry').classList.contains('unread');
-        out += `<path data-c="${dk}" stroke="${stroke}" opacity=".35" d="M${x(k)} ${y} L ${gut - 4} ${y}"/><circle data-c="${dk}" cx="${x(k)}" cy="${y}" r="${un ? 5.5 : 4}" fill="${un ? 'var(--unread)' : stroke}"/>`;
+    const top = river.getBoundingClientRect().top;
+    const y = (node) => node.getBoundingClientRect().top - top + 17;
+    const shape = (tag, attrs) => { const node = document.createElementNS(svg.namespaceURI, tag); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); svg.append(node); };
+    svg.replaceChildren(); svg.setAttribute('width', gut); svg.setAttribute('height', river.scrollHeight);
+    for (const id of laneIds) {
+      const nodes = list.filter((m) => m.channel_id === id).map((m) => entries.get(m.id));
+      if (!nodes.length) {
+        const branches = [...convs.values()].filter((lane) => lane.parent_id === id).map((lane) => y(labels.get(lane.id)));
+        shape('path', { 'data-c': id, stroke: laneColor(id), d: `M3 ${Math.min(...branches) - 24} Q${x(id)} ${Math.min(...branches) - 24} ${x(id)} ${Math.min(...branches) - 12} L${x(id)} ${Math.max(...branches) - 12}` });
+        continue;
+      }
+      const start = y(labels.get(id)), end = y(nodes.at(-1));
+      const parent = convs.get(id).parent_id;
+      const origin = parent ? x(parent) : 3;
+      shape('path', { 'data-c': id, stroke: laneColor(id), d: `M${origin} ${start - 12} Q${x(id)} ${start - 12} ${x(id)} ${start + 6} L${x(id)} ${end}` });
+      for (const node of nodes) {
+        shape('path', { 'data-c': id, stroke: laneColor(id), opacity: '.3', d: `M${x(id)} ${y(node)} L${gut - 5} ${y(node)}` });
+        shape('circle', { 'data-c': id, cx: x(id), cy: y(node), r: 4, fill: laneColor(id) });
       }
     }
-    svg.innerHTML = out;
+    for (const reply of replies) {
+      const from = entries.get(reply.from), to = entries.get(reply.to), a = x(from.dataset.c), b = x(to.dataset.c);
+      shape('path', { class: 'reply-arc', 'data-c': to.dataset.c, stroke: 'var(--soft)', opacity: '.35', d: `M${a} ${y(from)} C${Math.max(a, b) + 12} ${y(from)} ${Math.max(a, b) + 12} ${y(to)} ${b} ${y(to)}` });
+    }
     applyHover();
   };
-  draw();
-  document.fonts?.ready.then(draw);
-  window.onresize = draw;
-  // Images and fallbacks can change row heights after load: redraw when they settle.
-  river.querySelectorAll('img').forEach((img) => img.complete || img.addEventListener('load', () => requestAnimationFrame(draw), { once: true }));
-
-  if (key !== ui.feedKey) {
-    const firstNew = river.querySelector('.entry.unread');
-    if (firstNew) firstNew.scrollIntoView({ block: 'center' }); else sc.scrollTop = sc.scrollHeight;
-  } else sc.scrollTop = atBottom ? sc.scrollHeight : keep;
+  riverResize?.disconnect(); riverResize = new ResizeObserver(draw); riverResize.observe(river);
+  draw(); document.fonts?.ready.then(draw);
+  if (changed) {
+    const firstUnread = river.querySelector('.entry.unread');
+    scroll.scrollTop = firstUnread ? firstUnread.offsetTop - 8 : scroll.scrollHeight;
+  } else scroll.scrollTop = keep;
   ui.feedKey = key;
+  if (!changed && focusedId) entries.get(focusedId)?.focus({ preventScroll: true });
 }
-
 function applyHover() {
-  const k = ui.hover;
-  document.querySelectorAll('.river .entry, .river .conv').forEach((e) => e.classList.toggle('dim', !!k && e.dataset.c !== k));
-  document.querySelectorAll('.river svg.graph [data-c]').forEach((p) => (p.style.opacity = !k || p.dataset.c === k ? '' : '.12'));
+  for (const node of document.querySelectorAll('.river .entry, .river .conv')) node.classList.toggle('dim', !!ui.hover && node.dataset.c !== ui.hover);
+  for (const node of document.querySelectorAll('.graph [data-c]')) node.style.opacity = ui.hover && node.dataset.c !== ui.hover ? '.12' : '';
 }
-
 function render() {
-  if (S.theme === 'system') delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = S.theme;
-  $('#theme').value = S.theme;
-  renderSide();
-  renderRiver();
+  if (S.theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme;
+  $('#theme').value = S.theme; $('#retention').value = String(S.retentionDays);
+  renderSide(); renderRiver();
 }
-
-/* ---------------- edit collection sheet ---------------- */
-function openEdit(isNew) {
-  const c = collection();
-  ui.edit = { name: c.name, emoji: emojiOf(c), ids: new Set(c.ids), q: '', isNew };
-  drawSheet();
-  setTimeout(() => { const n = $('#cname'); n?.focus(); if (isNew) n?.select(); }, 40);
+// A visible bottom must remain in view for a full second. Unseen predecessors block advancement.
+let savingRead = false;
+async function sampleReading() {
+  if (document.hidden || ui.edit || $('#overlay')) { ui.visibleSince.clear(); return; }
+  const c = collection(); if (!c || savingRead) return;
+  const bounds = $('#scroll').getBoundingClientRect(), now = performance.now();
+  const present = new Set();
+  for (const node of document.querySelectorAll('.entry')) {
+    const id = node.dataset.id, rect = node.getBoundingClientRect(); present.add(id);
+    if (rect.bottom > bounds.top && rect.bottom <= bounds.bottom && rect.right > bounds.left && rect.left < bounds.right) {
+      if (!ui.visibleSince.has(id)) ui.visibleSince.set(id, now);
+      if (now - ui.visibleSince.get(id) >= 1000) ui.seen.add(id);
+    } else ui.visibleSince.delete(id);
+  }
+  for (const id of ui.visibleSince.keys()) if (!present.has(id)) ui.visibleSince.delete(id);
+  const next = readHighWater(S.msgs.filter((m) => inCollection(c, m)), c.readAt ?? 0, ui.seen);
+  if (next > (c.readAt ?? 0)) {
+    c.readAt = next; savingRead = true;
+    try { await saveCollections(); } finally { savingRead = false; }
+  }
 }
-
+setInterval(() => sampleReading().catch(reportError), 100);
+$('#scroll').addEventListener('scroll', () => sampleReading().catch(reportError), { passive: true });
+document.addEventListener('visibilitychange', () => ui.visibleSince.clear());
 const listenableChans = () => Object.values(S.chans).filter((c) => c.guild_id && !NOT_LISTENABLE.includes(c.type));
-const channelIdsOf = (pred) => listenableChans().filter(pred).map((c) => c.id);
-
-function drawSheet() {
-  const e = ui.edit, c = collection(), q = e.q.toLowerCase();
-  if ($('#cname')) e.name = $('#cname').value; // keep what was typed across redraws
-  const chans = Object.values(S.chans);
-  const listenable = listenableChans();
-  const byPos = (a, b) => (a.position ?? 0) - (b.position ?? 0) || (a.name ?? '').localeCompare(b.name ?? '');
-  const isNewCh = (channel) => c.seen?.length > 0 && !c.seen.includes(channel.id);
-  const guilds = [...new Set(listenable.map((c) => c.guild_id))].sort((a, b) => guildName(a).localeCompare(guildName(b)));
-  const cards = guilds.map((g) => {
-    const mine = listenable.filter((c) => c.guild_id === g);
-    const shown = mine.filter((c) => !q || (c.name ?? '').toLowerCase().includes(q) || guildName(g).toLowerCase().includes(q));
-    if (!shown.length) return '';
-    const on = mine.filter((c) => e.ids.has(c.id)).length;
-    const pills = (list) => `<div class="pills">${[...list].sort(byPos).map((c) =>
-      `<button class="pill ${e.ids.has(c.id) ? 'on' : ''}" data-pill="${esc(c.id)}" aria-pressed="${e.ids.has(c.id)}">#${esc(c.name)}${isNewCh(c) ? `<span class="nw">${h('newBadge')}</span>` : ''}</button>`).join('')}</div>`;
-    const loose = shown.filter((c) => !S.chans[c.parent_id]);
-    const cats = chans.filter((c) => c.guild_id === g && c.type === 4).sort(byPos)
-      .map((cat) => [cat, shown.filter((c) => c.parent_id === cat.id)]).filter(([, kids]) => kids.length);
-    return `<div class="sc ${on ? 'active' : ''}"><div class="sc-h">${fav(g)}<div><b>${esc(guildName(g))}</b><small>${on ? t('selectedChannels', [on, mine.length]) : t(mine.length === 1 ? 'channelCountOne' : 'channelCountMany', [mine.length])}</small></div>
-      <button class="switch ${on === mine.length ? 'on' : on ? 'part' : ''}" data-all="${esc(g)}" role="switch" aria-checked="${on === mine.length}" aria-label="${h('allChannelsIn', [guildName(g)])}"></button></div>
-      ${loose.length ? `<div class="cg">${pills(loose)}</div>` : ''}
-      ${cats.map(([cat, kids]) => `<div class="cg"><button data-cat="${esc(cat.id)}" title="${h('toggleCategory', [cat.name])}">${esc(cat.name)}</button>${pills(kids)}</div>`).join('')}</div>`;
-  }).join('');
-  const picker = c.all ? '' : !listenable.length
-    ? `<p class="mono" style="color:var(--faint);font-size:13px">${h('unknownServers')}</p>`
-    : `<div><label class="lab" for="sq">${h('sourcesChannels')}</label><div class="pickhead"><input class="inp" id="sq" placeholder="${h('searchSources')}" value="${esc(e.q)}"><span class="selc">${h(e.ids.size === 1 ? 'channelCountOne' : 'channelCountMany', [e.ids.size])}</span></div><div class="srccards">${cards || `<p class="mono" style="color:var(--faint);font-size:13px">${h('noSearchMatches')}</p>`}</div></div>`;
-  const html = `<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sht">
-    <div class="sh-head"><h2 id="sht">${e.isNew ? t('newCollection') : t('editCollection')}</h2><p>${c.all ? t('allCollectionDescription') : t('collectionDescription')}</p>
-      <button class="iconbtn x" id="sclose" aria-label="${h('close')}">${I.x.replace(/12px/g, '16px')}</button></div>
-    <div class="sh-body">
-      <div><label class="lab" for="cname">${h('name')}</label><div class="namerow"><button class="emo" id="emo" title="${h('changeIcon')}" aria-label="${h('changeIcon')}">${esc(e.emoji)}</button><input class="inp" id="cname" maxlength="40" value="${esc(e.name)}"></div></div>
-      ${picker}
-    </div>
-    <div class="sh-foot">${e.isNew ? '' : `<button class="btn danger" id="sdel">${h('delete')}</button>`}<span class="grow"></span><button class="btn ghost" id="scancel">${h('cancel')}</button><button class="btn primary" id="sdone">${h('done')}</button></div>
-  </div></div>`;
-  const old = $('#scrim');
-  if (old) {
-    const st = old.querySelector('.sh-body').scrollTop;
-    old.outerHTML = html;
-    $('#scrim').style.animation = $('#scrim .sheet').style.animation = 'none';
-    $('#scrim .sh-body').scrollTop = st;
-  } else document.body.insertAdjacentHTML('beforeend', html);
+const channelIdsOf = (predicate) => listenableChans().filter(predicate).map((c) => c.id);
+let returnFocus;
+function openEdit(isNew) {
+  const c = collection(); if (!c) return;
+  returnFocus = document.activeElement; ui.visibleSince.clear();
+  ui.edit = { name: c.name, emoji: emojiOf(c), ids: new Set(c.ids), q: '', isNew };
+  $('.app').inert = true; drawSheet(); $('#cname').focus(); if (isNew) $('#cname').select();
 }
-const closeSheet = () => { ui.edit = null; $('#scrim')?.remove(); };
-const toast = (text) => { const d = document.createElement('div'); d.className = 'toast'; d.textContent = text; document.body.append(d); setTimeout(() => d.remove(), 2200); };
-
-/* ---------------- events ---------------- */
-document.addEventListener('click', async (ev) => {
+function drawSheet() {
+  const e = ui.edit, c = collection();
+  const old = $('#scrim'), active = document.activeElement;
+  if ($('#cname')) e.name = $('#cname').value;
+  const position = old?.querySelector('.sh-body').scrollTop ?? 0;
+  const activeKey = active?.id;
+  const activePill = active?.dataset.pill;
+  const q = e.q.toLowerCase();
+  const picker = el('div');
+  if (!c.all) {
+    picker.append(el('label', { class: 'lab', for: 'sq' }, t('sourcesChannels')), el('div', { class: 'pickhead' }, el('input', { class: 'inp', id: 'sq', placeholder: t('searchSources'), value: e.q }), el('span', { class: 'selc' }, t(e.ids.size === 1 ? 'channelCountOne' : 'channelCountMany', [e.ids.size]))));
+    const cards = el('div', { class: 'srccards' });
+    const channels = listenableChans();
+    for (const guild of [...new Set(channels.map((ch) => ch.guild_id))].sort((a, b) => guildName(a).localeCompare(guildName(b)))) {
+      const all = channels.filter((ch) => ch.guild_id === guild);
+      const shown = all.filter((ch) => !q || `${ch.name} ${guildName(guild)}`.toLowerCase().includes(q)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+      if (!shown.length) continue;
+      const on = all.filter((ch) => e.ids.has(ch.id)).length;
+      const card = el('div', { class: `sc ${on ? 'active' : ''}` }, el('div', { class: 'sc-h' }, fav(guild), el('div', {}, el('b', {}, guildName(guild)), el('small', {}, on ? t('selectedChannels', [on, all.length]) : t(all.length === 1 ? 'channelCountOne' : 'channelCountMany', [all.length]))), button('', { class: `switch ${on === all.length ? 'on' : on ? 'part' : ''}`, role: 'switch', 'aria-checked': String(on === all.length), 'aria-label': t('allChannelsIn', [guildName(guild)]), 'data-all': guild })));
+      for (const category of [...new Set(shown.map((ch) => ch.parent_id))]) {
+        const group = el('div', { class: 'cg' });
+        if (S.chans[category]) group.append(button(S.chans[category].name, { 'data-cat': category, title: t('toggleCategory', [S.chans[category].name]) }));
+        group.append(el('div', { class: 'pills' }, shown.filter((ch) => ch.parent_id === category).map((ch) => button([`#${ch.name}`, ...(c.seen?.length && !c.seen.includes(ch.id) ? [el('span', { class: 'nw' }, t('newBadge'))] : [])], { class: `pill ${e.ids.has(ch.id) ? 'on' : ''}`, 'data-pill': ch.id, 'aria-pressed': String(e.ids.has(ch.id)) })))); card.append(group);
+      }
+      cards.append(card);
+    }
+    picker.append(cards.childElementCount ? cards : el('p', { class: 'mono' }, t(channels.length ? 'noSearchMatches' : 'unknownServers')));
+  }
+  const sheet = el('div', { class: 'scrim', id: 'scrim' }, el('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'sht' },
+    el('div', { class: 'sh-head' }, el('h2', { id: 'sht' }, t(e.isNew ? 'newCollection' : 'editCollection')), el('p', {}, t(c.all ? 'allCollectionDescription' : 'collectionDescription')), button('\u00d7', { class: 'iconbtn x', id: 'sclose', 'aria-label': t('close') })),
+    el('div', { class: 'sh-body' }, el('div', {}, el('label', { class: 'lab', for: 'cname' }, t('name')), el('div', { class: 'namerow' }, button(e.emoji, { class: 'emo', id: 'emo', title: t('changeIcon'), 'aria-label': t('changeIcon') }), el('input', { class: 'inp', id: 'cname', maxlength: '40', value: e.name }))), picker),
+    el('div', { class: 'sh-foot' }, ...(!e.isNew ? [button(t('delete'), { class: 'btn danger', id: 'sdel' })] : []), el('span', { class: 'grow' }), button(t('cancel'), { class: 'btn ghost', id: 'scancel' }), button(t('done'), { class: 'btn primary', id: 'sdone' }))));
+  if (old) old.replaceWith(sheet); else document.body.append(sheet);
+  sheet.querySelector('.sh-body').scrollTop = position;
+  if (activePill) [...sheet.querySelectorAll('[data-pill]')].find((node) => node.dataset.pill === activePill)?.focus();
+  else if (activeKey) document.getElementById(activeKey)?.focus();
+}
+function restoreFocus() {
+  $('.app').inert = false;
+  if (returnFocus?.isConnected) returnFocus.focus(); else ($('#edit') ?? $('#add2') ?? $('#add'))?.focus();
+}
+function closeSheet() { ui.edit = null; $('#scrim')?.remove(); restoreFocus(); }
+async function cancelSheet() {
+  if (ui.edit?.isNew) { S.collections = S.collections.filter((c) => c.id !== ui.collection); ui.collection = S.collections[0]?.id ?? null; }
+  closeSheet(); await refresh(true); restoreFocus();
+}
+const toast = (text) => { const node = el('div', { class: 'toast', role: 'status' }, text); document.body.append(node); setTimeout(() => node.remove(), 2200); };
+function closeOverlay() { $('#overlay')?.remove(); restoreFocus(); }
+function overlay(title, ...content) {
+  ui.visibleSince.clear();
+  if (!$('#overlay')) returnFocus = document.activeElement;
+  $('#overlay')?.remove(); $('.app').inert = true;
+  const node = el('div', { id: 'overlay', class: 'overlay' }, el('section', { class: 'overlay-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'overlay-title' }, el('h2', { id: 'overlay-title' }, title), ...content));
+  document.body.append(node); node.querySelector('button, a, input')?.focus();
+}
+function showWelcome() {
+  history.replaceState(null, '', '#welcome');
+  overlay(t('welcome'), el('p', {}, t('welcomeCapture')), el('p', {}, t('welcomeLocal')), el('p', {}, t('welcomeRisk')), button(t('understand'), { class: 'btn primary', id: 'consent', onclick: async () => {
+    await store.set({ consentedAt: Date.now() }); history.replaceState(null, '', location.pathname + location.search); showGuide();
+  } }));
+}
+function showGuide() {
+  overlay(t('guidedSteps'), el('ol', {}, el('li', {}, link(t('openDiscordStep'), 'https://discord.com/app')), el('li', { id: 'guide-signal' }, t(S.health?.state === 'ok' ? 'greenSignal' : 'waitSignal')), el('li', {}, button(t('createFirstCollection'), { class: 'textbtn', id: 'create-first', onclick: () => { closeOverlay(); newCollection(); } }))), button(t('done'), { class: 'btn', onclick: closeOverlay }));
+}
+function showRecovery(gap) {
+  const targets = gapTargets(gap);
+  overlay(t('recover'), el('p', {}, t('recoveryHint')), targets.length ? el('ul', {}, targets.map((target) => el('li', {}, link(`#${chanName(target.channelId)}`, target.url)))) : el('p', {}, t('recoveryUnavailable')), button(t('close'), { class: 'btn', onclick: closeOverlay }));
+}
+function showShortcuts() {
+  const shortcuts = [['j / k', 'shortcutMove'], ['n', 'shortcutUnread'], ['m', 'markRead'], ['/', 'search'], ['e', 'editCollection'], ['Esc', 'close'], ['?', 'shortcuts']];
+  overlay(t('shortcuts'), el('dl', {}, shortcuts.map(([key, name]) => [el('dt', {}, key), el('dd', {}, t(name))])), button(t('close'), { class: 'btn', onclick: closeOverlay }));
+}
+async function exportJSON(everything) {
+  const selected = everything ? { all: true, ids: [] } : collection(); if (!selected) return;
+  const [messages, channels, events] = await Promise.all([feedDB.recent(selected, S.chans, Number.MAX_SAFE_INTEGER), feedDB.channels(), feedDB.events(0)]);
+  const payload = { version: 1, exportedAt: new Date().toISOString(), collections: everything ? S.collections : [selected], channels: everything ? channels : channels.filter((ch) => selected.all || selected.ids.includes(ch.id) || selected.ids.includes(ch.parent_id)), messages, events };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+  const anchor = el('a', { href: url, download: `reader-${everything ? 'all' : selected.id}-${Date.now()}.json` }); document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function newCollection() {
+  const c = { id: `c${Date.now()}`, name: t('newCollection'), emoji: '\u{1f4c1}', all: false, ids: [], seen: [], readAt: 0 };
+  S.collections.push(c); ui.collection = c.id; ui.src = ui.conv = ui.q = ''; render(); openEdit(true);
+}
+async function markRead() {
+  const c = collection(); if (!c) return;
+  c.readAt = Math.max(c.readAt ?? 0, Date.now(), ...S.msgs.map((m) => Date.parse(m.timestamp)).filter(Number.isFinite));
+  ui.openReadAt = c.readAt; ui.expanded = false; await saveCollections(); toast(t('readHere'));
+}
+async function click(event) {
   const menu = $('#menu');
-  if (!ev.target.closest('#menu, #menubtn')) { menu.hidden = true; $('#menubtn').ariaExpanded = 'false'; }
-  const b = ev.target.closest('button');
-  if (!b) return;
+  if (!event.target.closest('#menu, #menubtn, #mobilemenu')) { menu.hidden = true; $('#menubtn').setAttribute('aria-expanded', 'false'); }
+  const b = event.target.closest('button'); if (!b) return;
   const e = ui.edit;
-  if (b.id === 'menubtn') { menu.hidden = !menu.hidden; b.ariaExpanded = String(!menu.hidden); }
-  else if (b.dataset.collection) { ui.collection = b.dataset.collection; ui.src = ui.conv = ui.q = ''; await refresh(true); }
+  if (b.id === 'menubtn' || b.id === 'mobilemenu') { menu.hidden = !menu.hidden; $('#menubtn').setAttribute('aria-expanded', String(!menu.hidden)); }
+  else if (b.dataset.collection) { ui.collection = b.dataset.collection; ui.src = ui.conv = ui.q = ''; ui.feedKey = null; await refresh(true); }
   else if (b.dataset.src) { ui.src = ui.src === b.dataset.src ? '' : b.dataset.src; ui.conv = ''; render(); }
   else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; ui.hover = null; renderRiver(); }
   else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
-  else if (b.id === 'markread') { collection().readAt = Date.now(); await saveCollections(); toast(t('readHere')); }
-  else if (b.id === 'themebtn') store.set({ theme: isDark() ? 'light' : 'dark' });
+  else if (b.id === 'markread') await markRead();
+  else if (b.id === 'themebtn') await store.set({ theme: isDark() ? 'light' : 'dark' });
   else if (b.id === 'edit' || b.id === 'emptyedit') openEdit(false);
-  else if (b.id === 'add' || b.id === 'add2') {
-    const c = { id: `c${Date.now()}`, name: t('newCollection'), emoji: '📁', all: false, ids: [], seen: [], readAt: 0 };
-    S.collections.push(c); ui.collection = c.id; ui.src = ui.conv = ui.q = ''; render(); openEdit(true);
-  }
+  else if (b.id === 'add' || b.id === 'add2') newCollection();
   else if (e && b.dataset.pill) { e.ids.has(b.dataset.pill) ? e.ids.delete(b.dataset.pill) : e.ids.add(b.dataset.pill); drawSheet(); }
   else if (e && (b.dataset.cat || b.dataset.all)) {
-    const ids = b.dataset.cat ? channelIdsOf((c) => c.parent_id === b.dataset.cat) : channelIdsOf((c) => c.guild_id === b.dataset.all);
-    const full = ids.every((id) => e.ids.has(id));
-    ids.forEach((id) => (full ? e.ids.delete(id) : e.ids.add(id)));
-    drawSheet();
-  }
-  else if (e && b.id === 'emo') { e.name = $('#cname').value; e.emoji = EMOJIS[(EMOJIS.indexOf(e.emoji) + 1) % EMOJIS.length]; drawSheet(); }
-  else if (b.id === 'sclose' || b.id === 'scancel') {
-    if (e?.isNew) { S.collections = S.collections.filter((c) => c.id !== ui.collection); ui.collection = S.collections[0]?.id ?? null; }
-    closeSheet(); await refresh(true);
-  }
-  else if (b.id === 'sdone') {
-    const c = collection();
-    c.name = $('#cname').value.trim() || t('unnamed');
-    c.emoji = e.emoji;
+    const ids = channelIdsOf((c) => b.dataset.cat ? c.parent_id === b.dataset.cat : c.guild_id === b.dataset.all);
+    const full = ids.every((id) => e.ids.has(id)); ids.forEach((id) => full ? e.ids.delete(id) : e.ids.add(id)); drawSheet();
+  } else if (e && b.id === 'emo') { e.emoji = EMOJIS[(EMOJIS.indexOf(e.emoji) + 1) % EMOJIS.length]; drawSheet(); }
+  else if (b.id === 'sclose' || b.id === 'scancel') await cancelSheet();
+  else if (e && b.id === 'sdone') {
+    const c = collection(); c.name = $('#cname').value.trim() || t('unnamed'); c.emoji = e.emoji;
     if (!c.all) { c.ids = [...e.ids]; c.seen = channelIdsOf(() => true); }
-    closeSheet();
-    await saveCollections();
-    toast(t('collectionReady', [c.name]));
-  }
-  else if (b.id === 'sdel') {
-    const c = collection();
-    if (!confirm(t('deleteCollection', [c.name]))) return;
-    S.collections = S.collections.filter((x) => x.id !== c.id); ui.collection = S.collections[0]?.id ?? null;
-    closeSheet(); await saveCollections();
-  }
-  else if (b.id === 'clean') {
+    closeSheet(); await saveCollections(); await refresh(true); restoreFocus(); toast(t('collectionReady', [c.name]));
+  } else if (e && b.id === 'sdel') {
+    const c = collection(); if (!confirm(t('deleteCollection', [c.name]))) return;
+    S.collections = S.collections.filter((x) => x.id !== c.id); ui.collection = S.collections[0]?.id ?? null; closeSheet(); await saveCollections(); await refresh(true); restoreFocus();
+  } else if (b.id === 'clean') {
     const count = await feedDB.outside(S.collections, S.chans);
     if (!count) return toast(t('noOutside'));
     if (confirm(t('deleteOutside', [count]))) await command('clean');
+  } else if (b.id === 'wipe') { if (confirm(t('wipeConfirm'))) await command('wipe'); }
+  else if (b.id === 'export-current') await exportJSON(false);
+  else if (b.id === 'export-all') await exportJSON(true);
+  else if (b.id === 'welcome') showWelcome();
+  else if (b.id === 'shortcuts') showShortcuts();
+}
+const reportError = (error) => console.error('[discord-feed]', error);
+document.addEventListener('click', (event) => click(event).catch(reportError));
+document.addEventListener('input', (event) => {
+  if (event.target.id === 'q') { ui.q = event.target.value; renderRiver(); }
+  if (event.target.id === 'sq') { ui.edit.q = event.target.value; drawSheet(); $('#sq').focus(); $('#sq').setSelectionRange(ui.edit.q.length, ui.edit.q.length); }
+});
+document.addEventListener('change', (event) => {
+  if (event.target.id === 'theme') store.set({ theme: event.target.value }).catch(reportError);
+  if (event.target.id === 'retention') store.set({ retentionDays: Number(event.target.value) }).catch(reportError);
+});
+document.addEventListener('keydown', (event) => {
+  const dialog = $('#scrim [role="dialog"], #overlay [role="dialog"]');
+  if (dialog) {
+    if (event.key === 'Escape') { event.preventDefault(); ui.edit ? cancelSheet().catch(reportError) : closeOverlay(); return; }
+    if (event.key === 'Tab') {
+      const focusable = [...dialog.querySelectorAll('button, a[href], input, select, [tabindex="0"]')].filter((node) => !node.disabled && !node.hidden);
+      const first = focusable[0], last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    if (event.key === 'Enter' && event.target.id === 'cname') $('#sdone').click();
+    return;
   }
-  else if (b.id === 'wipe') {
-    if (!confirm(t('wipeConfirm'))) return;
-    await command('wipe');
+  if (event.key === 'Escape') { $('#menu').hidden = true; $('#menubtn').setAttribute('aria-expanded', 'false'); return; }
+  if (event.target.closest('input, textarea, select, [contenteditable="true"]') || event.ctrlKey || event.altKey || event.metaKey) return;
+  if (!['j', 'k', 'n', 'm', '/', 'e', '?'].includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === '/') $('#q')?.focus();
+  else if (event.key === 'e') openEdit(false);
+  else if (event.key === 'm') markRead().catch(reportError);
+  else if (event.key === '?') showShortcuts();
+  else {
+    const entries = [...document.querySelectorAll('.entry')], index = entries.indexOf(document.activeElement?.closest('.entry'));
+    const next = event.key === 'n' ? entries.find((node, i) => i > index && node.classList.contains('unread')) : entries[Math.max(0, Math.min(entries.length - 1, index + (event.key === 'k' ? -1 : 1)))];
+    next?.focus({ preventScroll: true }); next?.scrollIntoView({ block: 'nearest' });
   }
 });
-document.addEventListener('input', (ev) => {
-  if (ev.target.id === 'q') { ui.q = ev.target.value; renderRiver(); }
-  if (ev.target.id === 'sq') {
-    ui.edit.q = ev.target.value; ui.edit.name = $('#cname').value; drawSheet();
-    const i = $('#sq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length);
-  }
-});
-document.addEventListener('change', (ev) => { if (ev.target.id === 'theme') store.set({ theme: ev.target.value }); });
-document.addEventListener('keydown', (ev) => {
-  if (!ui.edit) return;
-  if (ev.key === 'Escape') $('#scancel').click();
-  if (ev.key === 'Enter' && ev.target.id === 'cname') $('#sdone').click();
-});
-document.addEventListener('mousedown', (ev) => { if (ev.target.id === 'scrim') $('#scancel').click(); });
-document.addEventListener('mouseover', (ev) => {
-  const el = ev.target.closest('.river [data-c]');
-  const k = el ? el.dataset.c : null;
-  if (k !== ui.hover) { ui.hover = k; applyHover(); }
-});
-
-const command = async (kind) => {
-  const result = await api.runtime.sendMessage({ kind });
-  if (result?.error) throw new Error(result.error);
-};
+document.addEventListener('mousedown', (event) => { if (event.target.id === 'scrim') cancelSheet().catch(reportError); });
+document.addEventListener('mouseover', (event) => { const id = event.target.closest('.river [data-c]')?.dataset.c ?? null; if (id !== ui.hover) { ui.hover = id; applyHover(); } });
+const command = async (kind) => { const result = await api.runtime.sendMessage({ kind }); if (result?.error) throw new Error(result.error); await refresh(true); };
 let refreshing = Promise.resolve();
 const refresh = (force = false) => {
-  refreshing = refreshing.then(async () => { if (await load(force)) render(); })
-    .catch((error) => console.error('[discord-feed]', error));
-  return refreshing;
+  refreshing = refreshing.then(async () => { if (await load(force)) render(); }).catch(reportError); return refreshing;
 };
-store.onChanged.addListener((changes) => {
-  if (['rev', 'collections', 'theme'].some((key) => key in changes)) refresh();
-});
-setInterval(renderSide, 30e3); // keeps relative time and the no-signal warning honest
+store.onChanged.addListener((changes) => { if (['rev', 'collections', 'theme', 'health', 'consentedAt', 'retentionDays'].some((key) => key in changes)) refresh(); });
+setInterval(renderStatus, 30e3);
 for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
-for (const attribute of ['title', 'aria-label']) {
-  for (const element of document.querySelectorAll(`[data-i18n-${attribute}]`)) element.setAttribute(attribute, t(element.getAttribute(`data-i18n-${attribute}`)));
-}
+for (const attr of ['title', 'aria-label']) for (const node of document.querySelectorAll(`[data-i18n-${attr}]`)) node.setAttribute(attr, t(node.getAttribute(`data-i18n-${attr}`)));
 document.documentElement.lang = api.i18n.getUILanguage();
-refresh();
+window.addEventListener('hashchange', () => { if (location.hash === '#welcome') showWelcome(); });
+refresh().then(() => { if (location.hash === '#welcome' || !S.consentedAt) showWelcome(); });

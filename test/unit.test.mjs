@@ -97,7 +97,7 @@ assert.deepEqual(types, ['start', 'resumed', 'gap']);
 
 console.log('ok');
 
-// ---- threads.js: the four conversation rules on the sample from design/threads.html ----
+// ---- threads.js: channel lanes and explicit reply arcs on the original sample ----
 {
   const ctx = { module: { exports: {} } };
   vm.runInNewContext(readFileSync('threads.js', 'utf8'), ctx);
@@ -118,18 +118,20 @@ console.log('ok');
     ['m10', 'th', 'Luna', '13:48', 'Also on Linux'],
     ['m11', 'g', 'Luna', '13:49', 'Ready, we have four.'],
     ['m12', 'g', 'Mo', '13:50', 'Does it include a weapon?', { reply_to: 'm9' }],
-    ['m13', 'g', 'yazz', '14:10', 'Another topic: anyone see the stream?'], // 26 min later: yazz's old conversation is idle
+    ['m13', 'g', 'yazz', '14:10', 'Another topic: anyone see the stream?'], // Later messages stay in the same channel lane, regardless of silence
   ].map(([id, ch, who, t, content, extra]) => ({ id, channel_id: ch, author: { id: U[who] }, timestamp: at(t), content, ...extra }));
-  const { convOf, convs } = assignConversations(raw, { isThread: (c) => c === 'th', threadName: () => 'Build 0.4.2' });
+  const { convOf, convs, replies } = assignConversations(raw, { isThread: (c) => c === 'th', threadName: () => 'Build 0.4.2', parentId: () => 'g' });
   const same = (...ids) => ids.every((id) => convOf.get(id) === convOf.get(ids[0]));
-  assert.ok(same('m0', 'm2', 'm6', 'm9', 'm12'), 'rerun conversation: reply + author follow-up');
-  assert.ok(same('m1', 'm4', 'm8'), 'login conversation: mention + author follow-up');
-  assert.ok(same('m3', 'm7', 'm11'), 'coop conversation: reply + author follow-up');
-  assert.ok(same('m5', 'm10'), 'Discord thread is one conversation');
+  assert.ok(same('m0', 'm2', 'm6', 'm9', 'm12'), 'replies and follow-ups stay in their channel lane');
+  assert.ok(same('m1', 'm4', 'm8'), 'mentions and author follow-ups stay in their channel lane');
+  assert.ok(same('m3', 'm7', 'm11'), 'reply context does not split a channel');
+  assert.ok(same('m5', 'm10'), 'Discord thread has its own lane');
   assert.equal(convs.get(convOf.get('m5')).title, 'Build 0.4.2');
-  assert.ok(!same('m0', 'm1') && !same('m0', 'm3') && !same('m1', 'm3'), 'concurrent topics stay apart');
-  assert.ok(!same('m0', 'm13'), 'idle conversation is not resumed by a follow-up');
-  assert.equal(convs.size, 5);
+  assert.ok(same('m0', 'm1', 'm3') && !same('m0', 'm5'), 'concurrent channel topics share a lane; Discord threads remain separate');
+  assert.ok(same('m0', 'm13'), 'silence never splits a channel lane');
+  assert.equal(convs.size, 2);
+  assert.equal(convs.get('th').parent_id, 'g', 'thread branches from its parent channel');
+  assert.deepEqual(JSON.parse(JSON.stringify(replies)), [{ from: 'm0', to: 'm2' }, { from: 'm3', to: 'm7' }, { from: 'm9', to: 'm12' }], 'only explicit replies create secondary arcs');
   console.log('threads ok');
 }
 
@@ -193,4 +195,4 @@ const offsetStats = await db.overview([{ id: 'offset', ids: ['offset'], readAt: 
 assert.equal(offsetStats.stats.offset.total, 2);
 assert.equal(offsetStats.stats.offset.unread, 1, 'equal instant is read regardless of timezone notation');
 const grouping = vm.runInNewContext(`${readFileSync('threads.js', 'utf8')}; assignConversations([{ id: 'empty', channel_id: 'c', timestamp: '2026-01-01T00:00:00Z', content: '' }], { noText: 'No text' })`);
-assert.equal(grouping.convs.get('c:empty').title, i18n.getMessage('noText'), 'pure grouping accepts the viewer’s localized empty title');
+assert.equal(grouping.convs.get('c').title, i18n.getMessage('noText'), 'pure grouping accepts the viewer’s localized empty title');

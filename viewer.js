@@ -290,7 +290,10 @@ function applyHover() {
 function render() {
   if (S.theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme;
   $('#theme').value = S.theme; $('#retention').value = String(S.retentionDays);
+  // Re-renders replace nodes; keep keyboard focus on the same control (by id) so live updates don't drop it.
+  const focusedId = document.activeElement?.id;
   renderSide(); renderRiver();
+  if (focusedId && !document.activeElement?.id) document.getElementById(focusedId)?.focus({ preventScroll: true });
 }
 // A visible bottom must remain in view for a full second. Unseen predecessors block advancement.
 let savingRead = false;

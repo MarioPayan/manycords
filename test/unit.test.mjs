@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 
 const data = {};
 let onMessage;
-const revisionTimers = [];
 const { fakeIndexedDB } = await import('./fake-idb.mjs');
 const { i18n } = await import('./i18n.mjs');
 const browser = {
@@ -23,7 +22,7 @@ const browser = {
   action: { onClicked: { addListener() {} } },
 };
 data['m:old'] = { id: 'old' }; // previous schema: wiped on start
-const bg = vm.createContext({ browser, console, Date, ...fakeIndexedDB(), setTimeout: (callback, delay) => { assert.equal(delay, 500); revisionTimers.push(callback); return revisionTimers.length; } });
+const bg = vm.createContext({ browser, console, Date, ...fakeIndexedDB() }); // no timers: revisions go through the work queue
 vm.runInContext(readFileSync('db.js', 'utf8'), bg);
 vm.runInContext(readFileSync('background.js', 'utf8'), bg);
 const db = vm.runInContext('feedDB', bg);
@@ -39,7 +38,8 @@ const page = vm.createContext({
 });
 vm.runInContext(readFileSync('hook.js', 'utf8'), page);
 const frame = (o) => vm.runInContext(`JSON.parse(${JSON.stringify(JSON.stringify(o))})`, page);
-const settle = () => vm.runInContext('queue', bg);
+// Wait until the background work queue is drained, including work queued by work (revision announcers).
+const settle = async () => { let q; do { q = vm.runInContext('queue', bg); await q; } while (q !== vm.runInContext('queue', bg)); };
 
 const msg = (id, ch, content) => ({ op: 0, s: 1, t: 'MESSAGE_CREATE', d: {
   id, channel_id: ch, guild_id: 'g1', content, timestamp: '2026-10-27T10:00:00Z',
@@ -135,20 +135,19 @@ console.log('ok');
   console.log('threads ok');
 }
 
-// Revisions are debounced across all committed writes, including coverage events.
-assert.equal(data.rev, 0, 'writes do not broadcast a revision before the debounce');
-assert.equal(revisionTimers.length, 1, 'one pending revision for a burst');
-revisionTimers.shift()();
+// Revisions go through the work queue after committed writes; a burst queued together broadcasts once.
 await settle();
-assert.equal(data.rev, 1, 'committed burst broadcasts one revision');
+const revBefore = data.rev;
+assert.ok(revBefore > 0, 'earlier committed writes broadcast revisions');
+for (const name of ['general-a', 'general-b', 'general-c']) frame({ op: 0, s: 9, t: 'CHANNEL_UPDATE', d: { id: 'c2', name, guild_id: 'g1' } });
+await settle();
+assert.equal(data.rev, revBefore + 1, 'committed burst broadcasts one revision');
 const capturedAt = (await db.get('messages', 'm3')).captured_at;
 frame(msg('m3', 't1', 'in thread'));
 await settle();
 assert.equal((await db.get('messages', 'm3')).captured_at, capturedAt, 'dedupe keeps the original capture time');
 assert.equal((await db.recent({ all: true, ids: [] }, {}, 100)).filter((m) => m.id === 'm3').length, 1, 'dedupe stores a single record');
-assert.equal(revisionTimers.length, 1, 'later writes schedule the next window');
-revisionTimers.shift()(); await settle();
-assert.equal(data.rev, 2, 'later writes advance the revision');
+assert.equal(data.rev, revBefore + 2, 'later writes advance the revision');
 
 // Indexed queries cap the active collection while sidebar counts cover its complete history.
 await db.putChannels([{ id: 'thread', type: 11, parent_id: 'chosen', guild_id: 'g' }]);

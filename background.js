@@ -16,7 +16,6 @@ const PAGE_TIMEOUT = 180e3, FRAME_TIMEOUT = 300e3;
 const consented = (value) => Number.isFinite(value) && value > 0;
 let session = { leaderId: null, tabs: {}, order: 0 };
 let historyRuns = [];
-let revisionTimer;
 
 const init = async () => {
   if ((await store.get('schema')).schema === SCHEMA) return;
@@ -24,15 +23,19 @@ const init = async () => {
   await store.clear();
   await store.set({ schema: SCHEMA, rev: 0, collections: [{ id: 'all', name: api.i18n.getMessage('allCollection'), all: true, ids: [], seen: [], readAt: 0 }] });
 };
-// A fixed trailing window coalesces bursts without starving a continuously active feed.
+// Announce changes through the work queue, not a timer: a setTimeout created while the MV3
+// worker is starting can silently never fire (seen in Chromium e2e). A burst of changes
+// queues several announcers, but only the first one after a change writes.
+let dirty = false;
 const changed = () => {
-  if (revisionTimer) return;
-  revisionTimer = setTimeout(() => {
-    queue = queue.then(async () => {
-      const { rev = 0 } = await store.get('rev');
-      await store.set({ rev: rev + 1 });
-    }).catch(report).finally(() => { revisionTimer = null; });
-  }, 500);
+  if (dirty) return;
+  dirty = true;
+  queue = queue.then(async () => {
+    if (!dirty) return;
+    dirty = false;
+    const { rev = 0 } = await store.get('rev');
+    await store.set({ rev: rev + 1 });
+  }).catch(report);
 };
 const report = (error) => console.error('[discord-feed]', error);
 const log = (type, extra = {}) => feedDB.event({ type, at: Date.now(), ...extra });

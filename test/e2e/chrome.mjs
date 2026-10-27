@@ -51,8 +51,8 @@ try {
   assert.equal(history.guild_id, 'g1', 'history rows get guild_id from the stored channel');
   await viewer.locator('.entry .txt').filter({ hasText: 'Patch 2.3 tomorrow' }).waitFor();
   await viewer.locator('.entry .txt').filter({ hasText: 'Hello from the gateway' }).waitFor();
-  // rev is debounced (500 ms) after writes: wait for it rather than racing it
-  await viewer.waitForFunction(async () => ((await chrome.storage.local.get('rev')).rev ?? 0) > 0, null, { timeout: 5000 }).catch(() => {});
+  // rev is announced through the background queue after writes: wait for it, fail if it never comes
+  await viewer.waitForFunction(async () => ((await chrome.storage.local.get('rev')).rev ?? 0) > 0, null, { timeout: 5000 });
   const snapshot = await viewer.evaluate(async () => ({
     settings: await chrome.storage.local.get(null),
     channels: await feedDB.channels(),

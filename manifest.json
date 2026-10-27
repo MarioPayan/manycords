@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Discord Feed",
+  "version": "0.1.0",
+  "description": "Passively records gateway messages from all channels while one Discord tab is open.",
+  "browser_specific_settings": {
+    "gecko": { "id": "discord-feed@kaze.local", "strict_min_version": "128.0", "data_collection_permissions": { "required": ["none"] } }
+  },
+  "permissions": ["storage", "unlimitedStorage"],
+  "host_permissions": ["https://discord.com/*"],
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
+  "action": { "default_title": "Discord Feed" },
+  "content_scripts": [
+    { "matches": ["https://discord.com/*"], "js": ["hook.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://discord.com/*"], "js": ["relay.js"], "run_at": "document_start" }
+  ]
+}

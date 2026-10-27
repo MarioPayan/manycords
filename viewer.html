@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Discord Feed</title>
+  <style>
+    /* Ported from design/prototype.html. Reader layout: sidebar (collections, sources, listening) | river with conversation lanes. */
+    @font-face { font-family: "Geist"; src: url(fonts/geist.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
+    @font-face { font-family: "Geist Mono"; src: url(fonts/geist-mono.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
+    :root {
+      --bg: #f5f6f8; --side: #eef0f3; --surface: #ffffff; --sunk: #e8ebf0; --ink: #14161b; --soft: #5b606d; --faint: #9095a3; --line: #e0e3e9;
+      --hover: #e6e9ee; --signal: #6b5cff; --signal-ink: #ffffff; --unread: #ff5d3a; --ok: #12a26b; --scrim: rgba(20,22,27,.45);
+      --l0: #6b5cff; --l1: #e8590c; --l2: #0ca678; --l3: #d6336c; --l4: #1c7ed6; --l5: #ae3ec9;
+      --sans: "Geist", "Segoe UI", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+    }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+      --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #23262e;
+      --hover: #1c1f26; --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97; --scrim: rgba(0,0,0,.6);
+      --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; --l4: #4dabf7; --l5: #da77f2; color-scheme: dark;
+    } }
+    :root[data-theme="dark"] {
+      --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #23262e;
+      --hover: #1c1f26; --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97; --scrim: rgba(0,0,0,.6);
+      --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; --l4: #4dabf7; --l5: #da77f2; color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    /* font on body: Chrome's extension stylesheet sets body font-size 75% */
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); overflow: hidden; }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; border: 0; background: none; padding: 0; }
+    :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+    .app { height: 100%; display: grid; grid-template-columns: 272px minmax(0, 1fr); }
+    @media (max-width: 760px) { .app { grid-template-columns: minmax(0, 1fr); } .side { display: none !important; } }
+    .ic { width: 18px; height: 18px; display: block; }
+    .mono { font-family: var(--mono); }
+    .grow { flex: 1; }
+
+    /* sidebar */
+    .side { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 18px 12px 10px 18px; font-weight: 700; letter-spacing: -.01em; font-size: 16px; position: relative; }
+    .brand .mark { width: 26px; height: 26px; border-radius: 8px; background: var(--ink); color: var(--bg); display: grid; place-items: center; }
+    .menu { position: absolute; left: 12px; right: 12px; top: 54px; z-index: 10; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 32px -16px rgba(0,0,0,.35);
+      padding: 6px; display: grid; gap: 2px; font-weight: 400; font-size: 14px; }
+    .menu label { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; color: var(--soft); }
+    .menu select { background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; }
+    .menu button { text-align: left; padding: 7px 8px; border-radius: 8px; color: var(--soft); }
+    .menu button:hover { background: var(--hover); color: var(--ink); }
+    .menu button.danger { color: var(--unread); }
+    .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+    .side-scroll { flex: 1; overflow-y: auto; padding: 4px 10px 16px; display: grid; align-content: start; gap: 2px; scrollbar-width: thin; }
+    .group { display: flex; justify-content: space-between; align-items: center; padding: 14px 8px 6px; font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+    .group button { color: var(--faint); width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; }
+    .group button:hover { color: var(--ink); background: var(--hover); }
+    .item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 8px; color: var(--soft); text-align: left; }
+    .item:hover { background: var(--hover); color: var(--ink); }
+    .item.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 0 var(--line), 0 0 0 1px var(--line); font-weight: 600; }
+    .item .em { width: 22px; text-align: center; font-size: 16px; flex: none; }
+    .item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .item .n { font: 500 12px/1 var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+    .item.unread .n { color: var(--unread); }
+    .item.unread .nm { color: var(--ink); font-weight: 600; }
+    .fav { width: 20px; height: 20px; border-radius: 6px; display: inline-grid; place-items: center; font: 700 8px/1 var(--sans); color: #fff; flex: none; letter-spacing: -.02em;
+      background: var(--soft); object-fit: cover; overflow: hidden; }
+    .status { margin: 8px 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+    .status .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .status .row b { font-weight: 600; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; animation: pulse 2s infinite; }
+    .status.off .pulse { background: var(--unread); animation: none; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
+    .status small { color: var(--faint); font-size: 12px; margin-left: auto; font-family: var(--mono); }
+    .status .warnline { font-size: 12px; color: var(--unread); }
+    .spark { display: flex; gap: 2px; align-items: flex-end; height: 22px; }
+    .spark i { flex: 1; border-radius: 1px; background: color-mix(in srgb, var(--ok) 70%, transparent); min-height: 2px; }
+    .spark i.gap { background: var(--unread); height: 100% !important; }
+    .spark i.none { background: var(--sunk); }
+    .status .legend { display: flex; justify-content: space-between; gap: 6px; font: 11px/1 var(--mono); color: var(--faint); }
+    .status .legend span { white-space: nowrap; }
+    .status .legend .g { color: var(--unread); }
+
+    /* main */
+    .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .head { padding: 22px 28px 14px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); background: var(--bg); flex: none; }
+    .titlerow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .titlerow .em { font-size: 26px; }
+    .titlerow h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .iconbtn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--faint); flex: none; }
+    .iconbtn:hover { color: var(--ink); background: var(--hover); }
+    .search { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); width: 220px; color: var(--faint); }
+    .search:focus-within { border-color: var(--signal); }
+    .search input { border: 0; background: none; outline: none; flex: 1; min-width: 0; font-size: 14px; color: var(--ink); }
+    @media (max-width: 960px) { .search { width: 150px; } }
+    .subrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--soft); }
+    .newpill { font: 500 12px/1 var(--mono); color: var(--unread); background: color-mix(in srgb, var(--unread) 12%, transparent); padding: 5px 9px; border-radius: 99px; }
+    .textbtn { font-size: 13px; font-weight: 600; color: var(--signal); padding: 4px 6px; border-radius: 6px; }
+    .textbtn:hover { background: color-mix(in srgb, var(--signal) 10%, transparent); }
+    .chipf { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 3px 4px 3px 10px; color: var(--ink); font-weight: 500; max-width: 340px; }
+    .chipf > span:not(.sw) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chipf .sw { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .chipf .fav { width: 16px; height: 16px; font-size: 6px; }
+    .chipf button { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: var(--faint); flex: none; }
+    .chipf button:hover { background: var(--hover); color: var(--ink); }
+
+    .scroll { flex: 1; overflow-y: auto; scrollbar-width: thin; }
+    .river { position: relative; max-width: 860px; padding: 12px 28px 64px 0; margin-left: 14px; }
+    .river svg.graph { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+    .graph path { fill: none; stroke-width: 2.5; stroke-linecap: round; transition: opacity .15s; }
+    .graph circle { stroke: var(--bg); stroke-width: 3; transition: opacity .15s; }
+    .day { margin: 22px 0 6px var(--gut); font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; gap: 10px; }
+    .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .conv { margin: 14px 0 2px var(--gut); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; transition: opacity .15s; }
+    .conv button { display: inline-flex; align-items: center; gap: 8px; font: 600 12px/1.2 var(--sans); color: var(--c); background: color-mix(in srgb, var(--c) 11%, transparent); padding: 6px 10px; border-radius: 8px; max-width: 100%; text-align: left; }
+    .conv button:hover { background: color-mix(in srgb, var(--c) 18%, transparent); }
+    .conv button .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 420px; }
+    .conv .cm { font: 500 11px/1 var(--mono); color: var(--faint); }
+    .entry { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 8px 12px 8px 10px; margin-left: calc(var(--gut) - 10px); border-radius: 10px; transition: opacity .15s, background .15s; }
+    .entry:hover { background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+    .entry .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font: 700 13px/1 var(--sans); color: #fff; margin-top: 1px; object-fit: cover; background: hsl(var(--h, 230) 45% 52%); }
+    .entry .h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+    .entry .who { font-weight: 600; }
+    .entry .t { font: 12px/1 var(--mono); color: var(--faint); }
+    .where { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--soft); text-decoration: none; }
+    .where:hover { color: var(--ink); text-decoration: underline; }
+    .where .fav { width: 14px; height: 14px; border-radius: 4px; font-size: 6px; }
+    .entry .re, .entry .tag { font-size: 12px; color: var(--faint); }
+    .entry .txt { overflow-wrap: anywhere; white-space: pre-wrap; }
+    .entry .txt .ment { color: var(--signal); font-weight: 500; }
+    .entry.deleted .txt { text-decoration: line-through; color: var(--faint); }
+    .entry.unread .who::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--unread); margin-left: 7px; vertical-align: 1px; }
+    .entry.dim, .conv.dim, .day.dim { opacity: .22; }
+    .file { margin-top: 6px; display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 12px; font-size: 13px; max-width: 100%; }
+    .file .ft { width: 26px; height: 30px; border-radius: 4px; background: var(--sunk); display: grid; place-items: center; font: 600 8px/1 var(--mono); color: var(--soft); flex: none; }
+    .file small { display: block; color: var(--faint); font: 11px/1.3 var(--mono); }
+    .file > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .tools { position: absolute; right: 8px; top: 6px; display: none; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+    .entry:hover .tools { display: flex; }
+    .tools button, .tools a { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: var(--faint); }
+    .tools button:hover, .tools a:hover { color: var(--ink); background: var(--hover); }
+    .endcap { margin: 28px 0 0 var(--gut); display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 13px; }
+    .endcap .ok { width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); display: grid; place-items: center; }
+    .more { margin: 4px 0 8px var(--gut); font: 12px/1 var(--mono); color: var(--faint); }
+    .empty { max-width: 420px; margin: 80px auto; text-align: center; display: grid; gap: 10px; justify-items: center; color: var(--soft); padding: 0 24px; }
+    .empty h2 { margin: 0; color: var(--ink); font-size: 22px; letter-spacing: -.02em; }
+    .empty p { margin: 0; }
+    .btn { height: 38px; padding: 0 16px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+    .btn.primary { background: var(--ink); color: var(--bg); }
+    .btn.primary:hover { opacity: .88; }
+    .btn.ghost { color: var(--soft); }
+    .btn.ghost:hover { background: var(--hover); color: var(--ink); }
+    .btn.danger { color: var(--unread); }
+    .btn.danger:hover { background: color-mix(in srgb, var(--unread) 10%, transparent); }
+
+    /* edit collection sheet */
+    .scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 20; display: grid; grid-template-rows: 100%; justify-items: end; animation: fade .15s ease; }
+    @keyframes fade { from { opacity: 0 } }
+    @keyframes slide { from { transform: translateX(24px); opacity: 0 } }
+    .sheet { width: min(640px, 100%); height: 100%; min-height: 0; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; box-shadow: -24px 0 48px -24px rgba(0,0,0,.35); animation: slide .2s ease; }
+    .sh-head { padding: 22px 24px 14px; display: grid; gap: 4px; position: relative; border-bottom: 1px solid var(--line); }
+    .sh-head h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+    .sh-head p { margin: 0; color: var(--soft); font-size: 14px; padding-right: 32px; }
+    .sh-head .x { position: absolute; right: 16px; top: 16px; }
+    .sh-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; display: grid; gap: 22px; align-content: start; scrollbar-width: thin; }
+    .lab { display: block; font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 8px; }
+    .namerow { display: flex; gap: 8px; }
+    .emo { width: 44px; height: 44px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 20px; flex: none; }
+    .emo:hover { border-color: var(--faint); }
+    .inp { width: 100%; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); padding: 0 14px; font-size: 16px; font-weight: 600; outline: none; color: var(--ink); }
+    .inp:focus { border-color: var(--signal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 18%, transparent); }
+    .pickhead { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .pickhead .inp { height: 36px; font-size: 14px; font-weight: 400; }
+    .selc { font: 500 12px/1 var(--mono); color: var(--faint); white-space: nowrap; }
+    .selc b { color: var(--ink); }
+    .srccards { display: grid; gap: 10px; }
+    .sc { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 12px; transition: border-color .15s; }
+    .sc.active { border-color: color-mix(in srgb, var(--signal) 55%, var(--line)); }
+    .sc-h { display: flex; align-items: center; gap: 12px; }
+    .sc-h .fav { width: 36px; height: 36px; border-radius: 10px; font-size: 12px; }
+    .sc-h div { flex: 1; min-width: 0; }
+    .sc-h b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sc-h small { color: var(--faint); font: 12px/1.3 var(--mono); }
+    .switch { width: 38px; height: 22px; border-radius: 11px; background: var(--sunk); position: relative; transition: background .15s; flex: none; box-shadow: inset 0 0 0 1px var(--line); }
+    .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+    .switch.on { background: var(--signal); box-shadow: none; }
+    .switch.on::after { transform: translateX(16px); }
+    .switch.part { background: color-mix(in srgb, var(--signal) 40%, var(--sunk)); box-shadow: none; }
+    .switch.part::after { transform: translateX(8px); }
+    .cg { display: grid; gap: 6px; }
+    .cg > button { justify-self: start; font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+    .cg > button:hover { color: var(--ink); }
+    .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pill { height: 30px; padding: 0 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); font-size: 14px; display: inline-flex; align-items: center; gap: 4px; color: var(--soft); transition: background .12s, color .12s, border-color .12s; }
+    .pill:hover { border-color: var(--faint); color: var(--ink); }
+    .pill.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+    .pill .nw { font: 600 9px/1 var(--mono); background: var(--unread); color: #fff; padding: 3px 5px; border-radius: 4px; }
+    .sh-foot { padding: 14px 24px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; background: var(--bg); }
+    .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 500; z-index: 40; animation: fade .15s ease; }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="brand">
+        <span class="mark"><svg class="ic" style="width:15px;height:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 19a1 1 0 1 0 0-.01"/><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/></svg></span>
+        Discord Feed<span class="grow"></span>
+        <button class="iconbtn" id="menubtn" aria-label="Ajustes" title="Ajustes" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+        <div class="menu" id="menu" hidden>
+          <label>Tema <select id="theme"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label>
+          <hr>
+          <button id="clean">Borrar mensajes fuera de las colecciones</button>
+          <button id="wipe" class="danger">Borrar todos los mensajes</button>
+        </div>
+      </div>
+      <div class="side-scroll" id="side"></div>
+      <div class="status" id="status"></div>
+    </aside>
+    <main class="main">
+      <div class="head" id="head"></div>
+      <div class="scroll" id="scroll"></div>
+    </main>
+  </div>
+  <script src="threads.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>

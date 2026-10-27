@@ -1,0 +1,293 @@
+<title>Feed: antes de publicar</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: hero → 3 framing decisions with small mocks → triage board of improvements by area → sticky answer bar.
+   Same identity as the product: quiet surfaces, one violet signal, lane colours as accents. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --sunk: #eceef2; --ink: #14161b; --soft: #5b606d; --faint: #9095a3; --line: #e0e3e9;
+  --signal: #6b5cff; --signal-ink: #ffffff; --hot: #e5484d; --warm: #e8890c; --cool: #12a26b;
+  --l0: #6b5cff; --l1: #e8590c; --l2: #0ca678; --l3: #d6336c;
+  --sans: "Geist", "Segoe UI", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e0f13; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #262a32;
+  --signal: #9a8fff; --signal-ink: #0e0f13; --hot: #ff6b70; --warm: #ffa94d; --cool: #3ddc97;
+  --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0e0f13; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #262a32;
+  --signal: #9a8fff; --signal-ink: #0e0f13; --hot: #ff6b70; --warm: #ffa94d; --cool: #3ddc97;
+  --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); padding-block: 0 150px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+button, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; background: none; padding: 0; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 64px; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+.hero { padding-top: 64px; display: grid; gap: 16px; }
+.hero h1 { font: 800 clamp(34px, 5.5vw, 60px)/1 var(--sans); letter-spacing: -.035em; max-width: 18ch; }
+.hero p { margin: 0; max-width: 64ch; color: var(--soft); font-size: 17px; }
+.stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; display: grid; gap: 2px; min-width: 130px; }
+.stat b { font: 700 22px/1 var(--sans); font-variant-numeric: tabular-nums; }
+.stat span { font: 500 11px/1.2 var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+
+.sec-head { display: grid; gap: 8px; margin-bottom: 18px; }
+.sec-head h2 { font: 700 30px/1.1 var(--sans); letter-spacing: -.02em; }
+.sec-head p { margin: 0; color: var(--soft); max-width: 66ch; }
+
+/* framing decisions */
+.dec { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 22px; display: grid; gap: 16px; }
+.dec + .dec { margin-top: 14px; }
+.dec-h { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.dec-h .n { font: 600 13px/1 var(--mono); color: var(--signal); }
+.dec-h h3 { font-size: 21px; letter-spacing: -.01em; }
+.dec .why { margin: 0; color: var(--soft); max-width: 72ch; }
+.dec .why b { color: var(--ink); }
+.opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 860px) { .opts { grid-template-columns: 1fr; } }
+.opt { border: 1px solid var(--line); background: var(--bg); border-radius: 14px; padding: 14px; display: grid; gap: 10px; text-align: left; align-content: start; transition: border-color .15s, box-shadow .15s; }
+.opt:hover { border-color: var(--faint); }
+.opt[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); background: var(--surface); }
+.opt .k { display: flex; justify-content: space-between; align-items: center; font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.opt .rec { color: var(--signal); }
+.opt b { font-size: 16px; }
+.opt p { margin: 0; color: var(--soft); font-size: 14px; }
+.opt ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.opt li { padding-left: 16px; position: relative; color: var(--soft); }
+.opt li::before { position: absolute; left: 0; font: 600 13px/1.55 var(--mono); }
+.opt li.p::before { content: "+"; color: var(--cool); }
+.opt li.c::before { content: "−"; color: var(--hot); }
+.mock { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: grid; gap: 4px; font-size: 11px; position: relative; min-height: 96px; }
+.mock .r { display: flex; align-items: center; gap: 6px; height: 14px; color: var(--soft); white-space: nowrap; overflow: hidden; }
+.mock .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.mock .bar { height: 5px; border-radius: 3px; background: var(--sunk); flex: 1; }
+.mock .lab { font: 600 9px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; padding: 2px 5px; border-radius: 4px; }
+.mock svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.note { width: 100%; min-height: 44px; resize: vertical; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 10px; padding: 8px 10px; font: 14px/1.45 var(--sans); }
+
+/* triage */
+.filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.filters button { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 5px 12px; font-size: 13px; color: var(--soft); }
+.filters button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.area { margin-top: 26px; }
+.area-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.area-h h3 { font-size: 19px; }
+.area-h span { font: 12px/1 var(--mono); color: var(--faint); }
+.items { display: grid; gap: 8px; }
+.item { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: start; }
+@media (max-width: 760px) { .item { grid-template-columns: 1fr; } }
+.item .t { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.item .num { font: 600 12px/1 var(--mono); color: var(--faint); }
+.item h4 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.005em; }
+.sev { font: 600 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; padding: 4px 7px; border-radius: 6px; }
+.sev.block { color: var(--hot); background: color-mix(in srgb, var(--hot) 12%, transparent); }
+.sev.imp { color: var(--warm); background: color-mix(in srgb, var(--warm) 13%, transparent); }
+.sev.nice { color: var(--cool); background: color-mix(in srgb, var(--cool) 12%, transparent); }
+.sev.store { color: var(--signal); background: color-mix(in srgb, var(--signal) 12%, transparent); }
+.item .body { grid-column: 1; display: grid; gap: 4px; font-size: 14px; color: var(--soft); }
+.item .body p { margin: 0; }
+.item .body b { color: var(--ink); font-weight: 600; }
+.item .meta { font: 12px/1.4 var(--mono); color: var(--faint); }
+.seg { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; border: 1px solid var(--line); border-radius: 10px; padding: 2px; background: var(--bg); align-self: start; }
+@media (max-width: 760px) { .seg { grid-column: 1; grid-row: auto; justify-self: start; } }
+.seg button { padding: 6px 10px; border-radius: 8px; font-size: 13px; color: var(--soft); white-space: nowrap; position: relative; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
+.seg button.r::after { content: ""; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--signal); }
+.item .add { grid-column: 1 / -1; font-size: 12px; color: var(--faint); justify-self: start; }
+.item .add:hover { color: var(--ink); }
+.item textarea { grid-column: 1 / -1; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--faint); margin-bottom: 4px; }
+.legend i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--signal); margin-right: 6px; vertical-align: 2px; }
+
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.bar-in { max-width: 1040px; margin: 0 auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.sum { flex: 1; min-width: 240px; font-size: 13px; color: var(--soft); display: flex; gap: 12px; flex-wrap: wrap; }
+.sum b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.copy { background: var(--signal); color: var(--signal-ink); border-radius: 99px; padding: 10px 20px; font-weight: 700; }
+#out { width: 100%; font: 12px/1.4 var(--mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">Discord Feed · antes de publicar</div>
+    <h1>Lo que falta para que esto salga a la calle</h1>
+    <p>Primero, tres decisiones que cambian el resto: qué significan las líneas, en qué orden se lee y dónde se publica. Después, todo lo que encontré revisando el código, ordenado por área. Cada punto viene con mi recomendación marcada; cámbiala donde no estés de acuerdo.</p>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">Primero</div><h2>Tres decisiones de fondo</h2>
+      <p>En las dos primeras tus mensajes admiten dos lecturas; las pongo como opciones para no adivinar.</p></div>
+    <div id="decisions"></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">Después</div><h2>Mejoras por área</h2>
+      <p>Elige para cada una si va <b>antes</b> de publicar, <b>después</b> o <b>no</b>. Lo de las tiendas depende de la decisión 3.</p></div>
+    <div class="legend"><span><i></i>recomendación</span><span><span class="sev block">Bloquea</span> rompe algo o impide publicar</span><span><span class="sev imp">Importante</span> se nota en el uso diario</span><span><span class="sev nice">Mejora</span> pulido</span><span><span class="sev store">Tiendas</span> solo si publicas en tiendas</span></div>
+    <div class="filters" id="filters"></div>
+    <div id="areas"></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><div class="eyebrow">Al final</div><h2>Algo más</h2></div>
+    <textarea class="note" id="general" placeholder="Notas generales: prioridades, cosas que no aparecen aquí…" style="min-height:70px"></textarea>
+  </section>
+</div>
+
+<div class="bar"><div class="bar-in">
+  <div class="sum" id="sum"></div>
+  <button class="copy" id="copy">Copiar respuesta</button>
+  <textarea id="out" rows="6" readonly hidden></textarea>
+</div></div>
+
+<script>
+/* ---------- tiny mocks for the framing decisions ---------- */
+const row = (c, w, lab) => `<div class="r"><span class="dot" style="background:var(--${c})"></span>${lab ? `<span class="lab" style="color:var(--${c});background:color-mix(in srgb,var(--${c}) 14%,transparent)">${lab}</span>` : ''}<span class="bar" style="max-width:${w}%"></span></div>`;
+const MOCK = {
+  channel: `<div class="mock">${row('l0', 70, '#general')}${row('l0', 50)}${row('l1', 60, '#anuncios')}${row('l0', 80)}${row('l1', 40)}${row('l0', 55)}</div>`,
+  replies: `<div class="mock">${row('l0', 70, 'respuesta')}${row('l1', 50, 'suelto')}${row('l0', 80)}${row('l2', 60, 'hilo')}${row('l2', 45)}${row('l0', 55)}</div>`,
+  hybrid: `<div class="mock" style="padding-left:30px"><svg width="30" height="110"><path d="M10 10 V 100" stroke="var(--l0)" stroke-width="2.5"/><path d="M20 28 V 82" stroke="var(--l1)" stroke-width="2.5"/>
+    <path d="M10 46 C 4 56, 4 66, 10 82" stroke="var(--l0)" stroke-width="1.5" fill="none" stroke-dasharray="2 3"/></svg>${row('l0', 70, '#general')}${row('l1', 50, '#anuncios')}${row('l0', 80)}${row('l1', 60)}${row('l0', 55, '↳ responde')}${row('l0', 40)}</div>`,
+  newest: `<div class="mock"><div class="r" style="color:var(--signal);font:600 9px var(--mono)">↓ LO MÁS NUEVO</div>${row('l1', 70)}${row('l0', 50)}${row('l2', 60)}<div class="r" style="font:9px var(--mono)">— leídos —</div>${row('l0', 40)}</div>`,
+  resume: `<div class="mock">${row('l0', 40)}${row('l2', 30)}<div class="r" style="color:var(--hot);font:600 9px var(--mono)">— NUEVOS (abre aquí) —</div>${row('l1', 70)}${row('l0', 50)}${row('l2', 60)}</div>`,
+  unreadTop: `<div class="mock"><div class="r" style="font:9px var(--mono)">▸ 38 leídos anteriores</div><div class="r" style="color:var(--hot);font:600 9px var(--mono)">NUEVOS · desde 14:02</div>${row('l1', 70)}${row('l0', 50)}${row('l2', 60)}${row('l0', 45)}</div>`,
+};
+
+const DECISIONS = [
+  { n: 1, title: 'Qué une una línea', why: 'Dijiste que <b>la conexión no es que se respondan, sino que sean del mismo canal</b>. Puede ser una queja (hoy, con tus datos, las reglas acaban agrupando casi por canal) o una petición (quieres una línea por canal). Mi propuesta cubre las dos.',
+    opts: [
+      { key: 'A', name: 'Una línea por canal', mock: 'channel', text: 'Cada canal es una línea. Sin deducciones: nunca se equivoca.', p: ['Predecible y fácil de leer', 'Elimina las reglas que fallan'], c: ['No separa conversaciones cruzadas dentro de un canal (el problema original)'] },
+      { key: 'B', name: 'Solo conversaciones seguras', mock: 'replies', text: 'Una línea solo cuando hay respuesta de Discord o hilo. Los mensajes sueltos no se conectan.', p: ['Cero falsos positivos'], c: ['En canales donde nadie usa "responder" no hay líneas', 'Más ruido visual: muchos puntos sueltos'] },
+      { key: 'C', name: 'Canal + respuestas', mock: 'hybrid', rec: true, text: 'La línea es el canal; las respuestas de Discord se dibujan como arcos entre mensajes de esa línea. Las deducciones (reglas 3 y 4) desaparecen.', p: ['Lo que dices que ves, pero honesto', 'Las respuestas reales siguen visibles'], c: ['Un poco más de dibujo que A'] },
+    ] },
+  { n: 2, title: 'En qué orden se lee', why: 'Pediste que <b>se lea de arriba hacia abajo</b>. Hoy lo más antiguo está arriba y la vista salta al primer no leído, a media página.',
+    opts: [
+      { key: 'A', name: 'Lo más nuevo arriba', mock: 'newest', text: 'Como un lector RSS o un timeline: abres y lo primero es lo último.', p: ['Familiar en RSS', 'Nunca hay que desplazarse para ver lo nuevo'], c: ['Las respuestas quedan encima de sus preguntas', 'Las líneas se leen al revés'] },
+      { key: 'B', name: 'Como ahora', mock: 'resume', text: 'Antiguo arriba; al abrir, la vista se coloca en el primer no leído.', p: ['Es lo que hace Discord'], c: ['Abres en mitad de la página y no sabes dónde estás'] },
+      { key: 'C', name: 'Empieza en lo nuevo, baja leyendo', mock: 'unreadTop', rec: true, text: 'Arriba de todo, los no leídos en orden cronológico; lo ya leído queda plegado encima ("38 leídos anteriores").', p: ['Se lee de arriba abajo sin saltos', 'Las conversaciones fluyen en su orden real'], c: ['Hay que pulsar para ver lo leído'] },
+    ] },
+  { n: 3, title: 'Dónde se publica', why: 'Decide cuántas de las mejoras de "Tiendas" hacen falta. Ojo: capturar Discord desde el navegador va contra sus normas (scraping); una tienda puede rechazarlo y Discord puede pedir que se retire.',
+    opts: [
+      { key: 'A', name: 'Solo para mí', mock: null, text: 'Se carga como extensión de desarrollo, sin tiendas.', p: ['Cero trámites'], c: ['En Firefox hay que recargarla en cada arranque'] },
+      { key: 'B', name: 'Firmada, fuera de tiendas', mock: null, rec: true, text: 'Firefox: firmada como "unlisted" en AMO e instalable desde un archivo. Chrome: modo desarrollador. Para ti y amigos.', p: ['Firefox la conserva entre reinicios', 'Sin ficha pública ni exposición'], c: ['AMO revisa el código igualmente', 'En Chrome sigue en modo desarrollador'] },
+      { key: 'C', name: 'Tiendas públicas', mock: null, text: 'Chrome Web Store y Firefox Add-ons, con ficha pública.', p: ['Cualquiera puede instalarla'], c: ['Riesgo real de rechazo o retirada por las normas de Discord', 'Requiere nombre sin "Discord", política de privacidad e inglés'] },
+    ] },
+];
+
+/* ---------- triage items ---------- */
+const AREAS = [
+  { id: 'cap', name: 'Captura y fiabilidad', items: [
+    { title: 'Avisar si Discord cambia y la captura se rompe', sev: 'block', rec: 'A', why: 'Si Discord cambia su cliente, el hook deja de ver mensajes <b>sin ningún error</b>: la señal sigue verde. Detectarlo (señal viva pero 0 eventos de gateway en N minutos, o payloads con otra forma) y mostrar "La captura no funciona".', cost: 'S · hook.js + estado' },
+    { title: 'Varias pestañas de Discord abiertas', sev: 'imp', rec: 'A', why: 'Con dos pestañas, cada una envía los mismos eventos y la detección de huecos se confunde (una reconexión en una pestaña parece un hueco). Elegir una pestaña "líder" y avisar en las demás.', cost: 'S · relay + background' },
+    { title: 'Borrado automático de mensajes antiguos', sev: 'imp', rec: 'A', why: 'Hoy se guarda todo para siempre. Propuesta: conservar 14 días (configurable) y borrar el resto al arrancar.', cost: 'S · background' },
+    { title: 'Almacenamiento y pintado que aguanten miles de mensajes', sev: 'imp', rec: 'A', why: 'El visor carga <b>todo</b> el almacenamiento y repinta 400 mensajes con cada mensaje nuevo. Con miles de mensajes se volverá lento. Pasar a IndexedDB con índices y pintar solo lo que cambia.', cost: 'M · viewer + background' },
+    { title: 'Recuperar huecos (versión 2)', sev: 'nice', rec: 'B', why: 'Abrir automáticamente los canales afectados y leer hacia atrás hasta cubrir el hueco. Es el plan "por turnos" original.', cost: 'L · nueva pieza' },
+  ] },
+  { id: 'read', name: 'Lectura', items: [
+    { title: 'Enlaces clicables y formato de Discord', sev: 'imp', rec: 'A', why: 'Ahora los enlaces salen como texto plano y no se ve el formato: <b>negrita</b>, cursiva, código, citas, spoilers. Renderizar el markdown básico de Discord (sin HTML del mensaje).', cost: 'S · viewer' },
+    { title: 'Resaltar palabras clave por colección', sev: 'imp', rec: 'A', why: 'Era tu problema de origen: "aparece información importante que me pierdo". Cada colección con su lista de palabras (p. ej. "mantenimiento", tu nombre) y los mensajes que coinciden destacados y contados aparte.', cost: 'S · viewer + panel' },
+    { title: 'Notificación del sistema para palabras clave', sev: 'nice', rec: 'B', why: 'Lo mismo, pero avisando aunque el visor esté cerrado. Requiere el permiso de notificaciones.', cost: 'S · background' },
+    { title: 'Miniaturas de imágenes adjuntas', sev: 'nice', rec: 'B', why: 'Hoy solo sale "archivo no analizado". Mostrar la miniatura de imágenes desde el CDN de Discord (los enlaces caducan; habría que aceptarlo).', cost: 'S · hook + viewer' },
+    { title: 'Ver el mensaje respondido', sev: 'nice', rec: 'B', why: 'Al pasar por "↳ Luna", mostrar la cita del mensaje original como hace Discord.', cost: 'S · viewer' },
+    { title: 'Marcar leído al leer (por desplazamiento o por conversación)', sev: 'nice', rec: 'B', why: 'Ahora solo hay "marcar todo". Marcar automáticamente lo que pasa por pantalla, o una conversación entera.', cost: 'M · viewer' },
+    { title: 'Atajos de teclado', sev: 'nice', rec: 'B', why: 'j/k para moverse, m para marcar leído, / para buscar, Esc para cerrar.', cost: 'S · viewer' },
+    { title: 'Exportar a JSON', sev: 'nice', rec: 'B', why: 'Existía en la primera versión y se perdió con el rediseño.', cost: 'S · menú' },
+  ] },
+  { id: 'code', name: 'Código y calidad', items: [
+    { title: 'Todo el código en inglés', sev: 'imp', rec: 'A', why: 'Lo pediste. Comentarios y nombres ya lo están. Falta: <b>los textos de la interfaz</b> (25 líneas de viewer.js) a archivos de traducción <span class="mono">_locales/es</span> y <span class="mono">_locales/en</span> con la API i18n del navegador; datos de prueba en inglés; renombrar <span class="mono">tray</span> → <span class="mono">collection</span> en código y almacenamiento.', cost: 'M · todo el visor' },
+    { title: 'Repositorio git y README', sev: 'block', rec: 'A', why: 'La carpeta no es un repositorio: no hay historial ni forma de volver atrás. Crear el repo, un README con instalación y desarrollo, y el primer commit.', cost: 'S' },
+    { title: 'Pruebas del visor en el repo', sev: 'imp', rec: 'A', why: 'Las pruebas de extremo a extremo (Chromium con la extensión cargada y el visor con datos simulados) viven hoy en una carpeta temporal. Llevarlas al repo con un solo comando.', cost: 'S · test/' },
+    { title: 'Script de empaquetado por navegador', sev: 'imp', rec: 'A', why: 'Un zip para Chrome y otro para Firefox, sin design/ ni pruebas, y sin la clave service_worker que Firefox marca como aviso.', cost: 'S · build script' },
+    { title: 'Accesibilidad', sev: 'nice', rec: 'A', why: 'El foco no queda atrapado en el panel de edición, las líneas no tienen descripción para lectores de pantalla y la lista no se recorre con teclado.', cost: 'S · viewer' },
+  ] },
+  { id: 'pub', name: 'Publicación', items: [
+    { title: 'Nombre sin "Discord"', sev: 'store', rec: 'A', why: '"Discord" es marca registrada. Las tiendas rechazan nombres que parezcan oficiales y las normas de marca de Discord no permiten usarlo en el nombre de un producto. Hay que comprobar el texto exacto de esas normas; por si acaso, buscar otro nombre.', cost: 'S · decisión tuya' },
+    { title: 'Iconos y ficha', sev: 'store', rec: 'A', why: 'La extensión no tiene icono (sale el genérico del navegador). Faltan iconos de 16 a 128 px y, para tiendas, capturas y descripción.', cost: 'S · diseño' },
+    { title: 'Política de privacidad', sev: 'store', rec: 'B', why: 'Chrome Web Store la exige si se manejan datos de usuario. Puede ser una página corta: todo se queda en tu equipo y no se envía a nadie.', cost: 'S · texto' },
+    { title: 'Aviso al instalar sobre las normas de Discord', sev: 'imp', rec: 'A', why: 'Una pantalla de bienvenida que explique qué captura, que todo es local y que Discord no lo autoriza. Sirve también como primer uso guiado.', cost: 'S · onboarding' },
+    { title: 'Primer uso guiado', sev: 'imp', rec: 'A', why: 'Hoy, al abrir el visor vacío, no se explica que hay que abrir Discord y elegir canales. Tres pasos: abrir Discord → esperar la señal → crear la primera colección.', cost: 'S · viewer' },
+    { title: 'Revisar innerHTML para la tienda de Firefox', sev: 'store', rec: 'B', why: 'El lint marca 8 usos de innerHTML. Todo lo de Discord se escapa, pero AMO los revisa a mano; pasar a creación de nodos evita discusiones.', cost: 'M · viewer' },
+  ] },
+];
+const ITEMS = AREAS.flatMap((a) => a.items.map((it) => ({ ...it, area: a.id })));
+ITEMS.forEach((it, i) => (it.n = i + 4));
+const SEV = { block: 'Bloquea', imp: 'Importante', nice: 'Mejora', store: 'Tiendas' };
+const BUCKET = { A: 'Antes', B: 'Después', C: 'No' };
+
+const state = { d: Object.fromEntries(DECISIONS.map((d) => [d.n, d.opts.find((o) => o.rec).key])), t: Object.fromEntries(ITEMS.map((it) => [it.n, it.rec])), notes: {}, filter: 'all', general: '' };
+
+function drawDecisions() {
+  document.getElementById('decisions').innerHTML = DECISIONS.map((d) => `<div class="dec"><div class="dec-h"><span class="n">${d.n}</span><h3>${d.title}</h3></div><p class="why">${d.why}</p>
+    <div class="opts">${d.opts.map((o) => `<button class="opt" data-dec="${d.n}" data-k="${o.key}" aria-pressed="${state.d[d.n] === o.key}">
+      <span class="k"><span>${d.n}${o.key}</span>${o.rec ? '<span class="rec">recomendada</span>' : ''}</span>${o.mock ? MOCK[o.mock] : ''}<b>${o.name}</b><p>${o.text}</p>
+      <ul>${o.p.map((x) => `<li class="p">${x}</li>`).join('')}${o.c.map((x) => `<li class="c">${x}</li>`).join('')}</ul></button>`).join('')}</div>
+    <textarea class="note" data-note="d${d.n}" placeholder="Nota (opcional)">${state.notes['d' + d.n] ?? ''}</textarea></div>`).join('');
+}
+function drawAreas() {
+  const counts = { all: ITEMS.length, block: 0, imp: 0, nice: 0, store: 0 };
+  ITEMS.forEach((it) => counts[it.sev]++);
+  document.getElementById('filters').innerHTML = [['all', 'Todas'], ['block', 'Bloquea'], ['imp', 'Importante'], ['nice', 'Mejora'], ['store', 'Tiendas']]
+    .map(([k, l]) => `<button data-filter="${k}" aria-pressed="${state.filter === k}">${l} · ${counts[k]}</button>`).join('');
+  document.getElementById('areas').innerHTML = AREAS.map((a) => {
+    const its = ITEMS.filter((it) => it.area === a.id && (state.filter === 'all' || it.sev === state.filter));
+    if (!its.length) return '';
+    return `<div class="area"><div class="area-h"><h3>${a.name}</h3><span>${its.length}</span></div><div class="items">${its.map((it) => `<div class="item">
+      <div class="t"><span class="num">${it.n}</span><h4>${it.title}</h4><span class="sev ${it.sev}">${SEV[it.sev]}</span></div>
+      <div class="seg" role="group" aria-label="Cuándo">${Object.entries(BUCKET).map(([k, l]) => `<button class="${it.rec === k ? 'r' : ''}" data-item="${it.n}" data-k="${k}" aria-pressed="${state.t[it.n] === k}" title="${it.rec === k ? 'Recomendado' : ''}">${l}</button>`).join('')}</div>
+      <div class="body"><p>${it.why}</p><span class="meta">Esfuerzo ${it.cost}</span></div>
+      ${state.notes['i' + it.n] !== undefined ? `<textarea class="note" data-note="i${it.n}" placeholder="Nota">${state.notes['i' + it.n]}</textarea>` : `<button class="add" data-addnote="${it.n}">+ nota</button>`}</div>`).join('')}</div></div>`;
+  }).join('');
+}
+function answer() {
+  const out = ['DECISIONS · feed-prelaunch · round 1', '# Discord Feed: antes de publicar', ''];
+  for (const d of DECISIONS) {
+    const o = d.opts.find((x) => x.key === state.d[d.n]);
+    out.push(`${d.n}${o.key} — ${d.title}: ${o.name}${o.rec ? ' (recommended)' : ''}`);
+    if (state.notes['d' + d.n]) out.push(`   note: ${state.notes['d' + d.n]}`);
+  }
+  for (const it of ITEMS) {
+    const k = state.t[it.n];
+    out.push(`${it.n}${k} — ${it.title}: ${BUCKET[k]}${k === it.rec ? ' (recommended)' : ''}`);
+    if (state.notes['i' + it.n]) out.push(`   note: ${state.notes['i' + it.n]}`);
+  }
+  if (state.general) out.push('General notes:', ...state.general.split('\n').map((l) => `   ${l}`));
+  return out.join('\n');
+}
+function sync() {
+  const c = { A: 0, B: 0, C: 0 };
+  ITEMS.forEach((it) => c[state.t[it.n]]++);
+  const changed = ITEMS.filter((it) => state.t[it.n] !== it.rec).length + DECISIONS.filter((d) => state.d[d.n] !== d.opts.find((o) => o.rec).key).length;
+  document.getElementById('sum').innerHTML = `<span>Antes <b>${c.A}</b></span><span>Después <b>${c.B}</b></span><span>No <b>${c.C}</b></span><span>${changed ? `<b>${changed}</b> cambios sobre lo recomendado` : 'Todo como lo recomendado'}</span>`;
+  document.getElementById('stats').innerHTML = `<div class="stat"><b>3</b><span>decisiones</span></div><div class="stat"><b>${ITEMS.length}</b><span>mejoras</span></div><div class="stat"><b>${ITEMS.filter((i) => i.sev === 'block').length}</b><span>bloquean</span></div><div class="stat"><b>${c.A}</b><span>antes de publicar</span></div>`;
+  document.getElementById('out').value = answer();
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.dec) { state.d[b.dataset.dec] = b.dataset.k; drawDecisions(); }
+  else if (b.dataset.item) { state.t[b.dataset.item] = b.dataset.k; drawAreas(); }
+  else if (b.dataset.filter) { state.filter = b.dataset.filter; drawAreas(); }
+  else if (b.dataset.addnote) { state.notes['i' + b.dataset.addnote] = ''; drawAreas(); document.querySelector(`[data-note="i${b.dataset.addnote}"]`).focus(); }
+  else if (b.id === 'copy') {
+    const out = document.getElementById('out'); out.hidden = false;
+    try { await navigator.clipboard.writeText(out.value); b.textContent = 'Copiado'; } catch { out.select(); b.textContent = 'Selecciona y copia'; }
+    return;
+  } else return;
+  sync();
+});
+document.addEventListener('input', (e) => {
+  if (e.target.dataset.note) state.notes[e.target.dataset.note] = e.target.value.trim();
+  if (e.target.id === 'general') state.general = e.target.value.trim();
+  sync();
+});
+drawDecisions(); drawAreas(); sync();
+</script>

@@ -1,0 +1,383 @@
+<title>Feed: hilos y líneas</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: editorial intro → three live thread systems on the same data → detection rules → identity → answer bar.
+   Identity for "Discord Feed": a modern RSS reader — paper-quiet surfaces, one violet signal inherited from Discord, lane colours for conversations. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --sunk: #eceef2; --ink: #14161b; --soft: #5b606d; --faint: #9095a3; --line: #e0e3e9;
+  --signal: #6b5cff; --signal-ink: #ffffff; --unread: #ff5d3a; --ok: #12a26b;
+  --l1: #6b5cff; --l2: #e8590c; --l3: #0ca678; --l4: #d6336c; --l5: #1c7ed6;
+  --sans: "Geist", "Segoe UI", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e0f13; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #262a32;
+  --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97;
+  --l1: #9a8fff; --l2: #ff922b; --l3: #38d9a9; --l4: #f06595; --l5: #4dabf7; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0e0f13; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #262a32;
+  --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97;
+  --l1: #9a8fff; --l2: #ff922b; --l3: #38d9a9; --l4: #f06595; --l5: #4dabf7; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); padding-block: 0 140px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; padding: 0; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 72px; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+h1, h2, h3 { text-wrap: balance; }
+
+.hero { padding-top: 64px; display: grid; gap: 16px; }
+.hero h1 { font: 800 clamp(36px, 6vw, 68px)/.98 var(--sans); letter-spacing: -.035em; margin: 0; max-width: 16ch; }
+.hero h1 .lane { background: linear-gradient(90deg, var(--l1), var(--l2) 50%, var(--l3)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero p { margin: 0; max-width: 62ch; color: var(--soft); font-size: 17px; }
+.problem { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
+@media (max-width: 760px) { .problem { grid-template-columns: 1fr; } }
+.problem div { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; font-size: 14px; color: var(--soft); }
+.problem b { display: block; color: var(--ink); font-size: 15px; margin-bottom: 2px; }
+
+.section-head { display: grid; gap: 8px; margin-bottom: 20px; }
+.section-head h2 { font: 700 32px/1.1 var(--sans); letter-spacing: -.02em; margin: 0; }
+.section-head p { margin: 0; color: var(--soft); max-width: 64ch; }
+
+/* option switcher */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.tab { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 14px; display: grid; gap: 2px; text-align: left; min-width: 180px; }
+.tab small { color: var(--faint); font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.tab b { font-size: 15px; }
+.tab[aria-selected="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.tab .rec { color: var(--signal); }
+.opt { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 900px) { .opt { grid-template-columns: 1fr; } }
+.verdict { display: grid; gap: 12px; position: sticky; top: 16px; }
+.verdict h3 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+.verdict p { margin: 0; color: var(--soft); }
+.pc { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.pc li { padding-left: 20px; position: relative; }
+.pc li::before { position: absolute; left: 0; font: 600 14px/1.55 var(--mono); }
+.pc.pro li::before { content: "+"; color: var(--ok); }
+.pc.con li::before { content: "−"; color: var(--unread); }
+.meta { font: 12px/1.4 var(--mono); color: var(--faint); }
+.pick { justify-self: start; border: 1.5px solid var(--ink); border-radius: 99px; padding: 8px 16px; font-weight: 600; font-size: 14px; }
+.pick[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.note { width: 100%; min-height: 56px; resize: vertical; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; padding: 8px 10px; font: 14px/1.45 var(--sans); }
+
+/* ========== the reader mock ========== */
+.reader { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 1px 0 var(--line), 0 24px 48px -32px rgba(20,22,27,.35); }
+.rtop { display: flex; align-items: center; gap: 12px; padding: 16px 20px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.rtop h4 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+.rtop .count { font: 500 12px/1 var(--mono); color: var(--unread); background: color-mix(in srgb, var(--unread) 12%, transparent); padding: 4px 8px; border-radius: 99px; }
+.rtop .grow { flex: 1; }
+.src { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--soft); }
+.src i { width: 16px; height: 16px; border-radius: 5px; display: inline-grid; place-items: center; font: 700 7px/1 var(--sans); color: #fff; font-style: normal; }
+.river { position: relative; padding: 8px 20px 20px 0; }
+.river svg.graph { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.entry { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 8px 0; transition: opacity .2s; }
+.entry .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font: 700 12px/1 var(--sans); color: #fff; margin-top: 2px; }
+.entry .h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.entry .who { font-weight: 600; }
+.entry .t { font: 12px/1 var(--mono); color: var(--faint); }
+.entry .re { font-size: 12px; color: var(--faint); display: inline-flex; gap: 4px; align-items: center; }
+.entry .txt { font-size: 15px; overflow-wrap: anywhere; }
+.entry.unread .who::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--unread); margin-left: 6px; vertical-align: 2px; }
+.convlabel { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent);
+  padding: 4px 8px; border-radius: 6px; margin: 10px 0 2px; }
+.convlabel span { color: var(--faint); font-weight: 500; }
+
+/* A — lanes */
+.lanes .entry { margin-left: var(--gut); }
+.lanes .convlabel { margin-left: var(--gut); }
+.graph path { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+.graph circle { stroke: var(--surface); stroke-width: 3; }
+.lanes .entry.dim, .lanes .convlabel.dim { opacity: .28; }
+
+/* B — conversation cards */
+.cards .river { padding: 12px 20px 20px; display: grid; gap: 12px; }
+.conv { border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px 10px; border-left: 4px solid var(--c); background: var(--bg); }
+.conv .convlabel { margin-top: 10px; }
+.conv .entry { padding: 6px 0; }
+.conv .more { font: 500 12px/1 var(--mono); color: var(--soft); padding: 6px 0 4px 38px; display: block; }
+.conv .more:hover { color: var(--ink); }
+.conv .last { font: 12px/1 var(--mono); color: var(--faint); float: right; margin-top: 12px; }
+
+/* C — highlight */
+.hl .river { padding-left: 20px; }
+.hl .entry { padding-left: 12px; border-left: 3px solid color-mix(in srgb, var(--c) 55%, transparent); margin-left: -12px; cursor: pointer; border-radius: 0 8px 8px 0; }
+.hl .entry:hover { background: var(--sunk); }
+.hl.focus .entry { opacity: .25; }
+.hl.focus .entry.on { opacity: 1; border-left-color: var(--c); background: color-mix(in srgb, var(--c) 7%, transparent); }
+.hint { font-size: 12px; color: var(--faint); padding: 0 20px 14px; font-family: var(--mono); }
+
+/* detection */
+.rules { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .rules { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .rules { grid-template-columns: 1fr; } }
+.rule { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 6px; align-content: start; }
+.rule .n { font: 600 12px/1 var(--mono); color: var(--signal); }
+.rule b { font-size: 16px; }
+.rule p { margin: 0; color: var(--soft); font-size: 14px; }
+.rule .conf { font: 11px/1 var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+.choice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+@media (max-width: 760px) { .choice { grid-template-columns: 1fr; } }
+.cbox { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 8px; text-align: left; align-content: start; }
+.cbox[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.cbox small { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cbox b { font-size: 16px; }
+.cbox span { color: var(--soft); font-size: 14px; }
+.cbox .rec { color: var(--signal); }
+
+/* identity */
+.ident { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .ident { grid-template-columns: 1fr; } }
+.ident div { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 4px; }
+.ident .from { font: 500 12px/1.3 var(--mono); color: var(--faint); text-decoration: line-through; }
+.ident b { font-size: 16px; }
+.ident p { margin: 0; color: var(--soft); font-size: 14px; }
+
+/* bar */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.bar-in { max-width: 1080px; margin: 0 auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.bar-in .sum { flex: 1; min-width: 220px; font-size: 13px; color: var(--soft); }
+.bar-in .sum b { color: var(--ink); }
+.copy { background: var(--signal); color: var(--signal-ink); border-radius: 99px; padding: 10px 20px; font-weight: 700; }
+#out { width: 100%; font: 12px/1.4 var(--mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">Discord Feed · ronda 2 · hilos</div>
+    <h1>Seguir el hilo cuando <span class="lane">todos hablan a la vez</span></h1>
+    <p>Discord Feed deja de parecer Discord y pasa a ser un lector: tus servidores son fuentes, tus bandejas son colecciones y cada conversación tiene su propio color. Abajo, tres formas de desenredar un canal donde se cruzan varias conversaciones. Mismos datos en las tres; son inventados.</p>
+    <div class="problem">
+      <div><b>El problema</b>En #general se cruzan tres conversaciones a la vez. Leído en orden, cada mensaje parece responder al anterior.</div>
+      <div><b>La pista que ya tenemos</b>Discord nos dice cuándo un mensaje responde a otro, y en qué hilo de Discord está.</div>
+      <div><b>Lo que falta</b>Unir los mensajes sueltos que no usan "responder". Eso lo deducimos: ver reglas más abajo.</div>
+    </div>
+  </header>
+
+  <section>
+    <div class="section-head"><div class="eyebrow">Decisión 1</div><h2>Cómo se ve una conversación</h2>
+      <p>Cambia entre las tres opciones. En A, pasa el ratón por una línea para aislar su conversación. En C, haz clic en un mensaje.</p></div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="opt">
+      <div id="stage"></div>
+      <div class="verdict" id="verdict"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><div class="eyebrow">Decisión 2</div><h2>Cómo sabe a qué conversación va cada mensaje</h2>
+      <p>Se aplican en orden; la primera que encaja gana. Todo ocurre en tu navegador, sin IA. Las reglas 3 y 4 son deducciones y pueden fallar.</p></div>
+    <div class="rules">
+      <div class="rule"><span class="n">01</span><b>Respuesta</b><p>Si el mensaje usa "responder" de Discord, va a la conversación del mensaje respondido.</p><span class="conf">Certeza total</span></div>
+      <div class="rule"><span class="n">02</span><b>Hilo de Discord</b><p>Los mensajes dentro de un hilo de Discord son una sola conversación, con el título del hilo.</p><span class="conf">Certeza total</span></div>
+      <div class="rule"><span class="n">03</span><b>Mención o seguimiento</b><p>Si menciona a alguien que habló hace poco, o su autor sigue hablando a los pocos minutos, se une a esa conversación.</p><span class="conf">Deducción</span></div>
+      <div class="rule"><span class="n">04</span><b>Silencio</b><p>Si nada encaja y pasaron más de 10 min desde el último mensaje del canal, empieza una conversación nueva.</p><span class="conf">Deducción</span></div>
+    </div>
+    <div class="choice" id="detect"></div>
+    <textarea class="note" id="note-2" placeholder="Nota sobre la detección" style="margin-top:12px"></textarea>
+  </section>
+
+  <section>
+    <div class="section-head"><div class="eyebrow">Decisión 3</div><h2>Identidad: un RSS moderno</h2>
+      <p>Lo que cambia respecto al prototipo anterior. Las maquetas de arriba ya usan esta dirección.</p></div>
+    <div class="ident">
+      <div><span class="from">Barra de servidores redonda</span><b>Fuentes</b><p>Los servidores son fuentes con su icono, como los feeds de un lector RSS. Se filtran desde una lista, no desde una barra.</p></div>
+      <div><span class="from">Canales a la derecha</span><b>Colecciones</b><p>Las bandejas son colecciones con su contador; dentro, los mensajes se leen como un río de entradas.</p></div>
+      <div><span class="from">Gris Discord y azul de marca</span><b>Superficies tranquilas</b><p>Fondo claro u oscuro neutro, un solo violeta heredado de Discord y color reservado para las conversaciones.</p></div>
+      <div><span class="from">Línea roja NUEVOS</span><b>Puntos de no leído</b><p>Un punto junto al autor, como un lector RSS. "Marcar como leído" vive en el encabezado de la colección.</p></div>
+    </div>
+    <div class="choice" id="ident"></div>
+    <textarea class="note" id="note-3" placeholder="Nota sobre la identidad" style="margin-top:12px"></textarea>
+  </section>
+</div>
+
+<div class="bar"><div class="bar-in">
+  <div class="sum" id="sum"></div>
+  <button class="copy" id="copy">Copiar respuesta</button>
+  <textarea id="out" rows="6" readonly hidden></textarea>
+</div></div>
+
+<script>
+/* ---------- data: one busy #general plus a few other sources ---------- */
+const SRC = { gc: ['Gacha Club', '#e8590c'], id: ['Indie Devs', '#1c7ed6'] };
+const PEOPLE = { yazz: 265, Kira: 330, Nico: 190, Mo: 0, Luna: 300, Tito: 50, Pablo: 30 };
+const CONVS = {
+  c1: { title: 'Rerun del banner de Aster', lane: 1 },
+  c2: { title: 'Error al iniciar sesión', lane: 2 },
+  c3: { title: 'Equipo para el evento coop', lane: 3 },
+  c4: { title: 'Hilo · Build 0.4.2', lane: 4 },
+};
+// reply: index of the message it answers (explicit Discord reply)
+const M = [
+  { c: 'c1', s: 'gc', ch: 'general', who: 'yazz', t: '13:40', text: '¿El banner nuevo trae rerun de Aster?' },
+  { c: 'c2', s: 'gc', ch: 'general', who: 'Tito', t: '13:41', text: 'Me sale error 502 al entrar desde ayer.' },
+  { c: 'c1', s: 'gc', ch: 'general', who: 'Kira', t: '13:42', text: 'Sí, a partir del jueves.', reply: 0 },
+  { c: 'c3', s: 'gc', ch: 'general', who: 'Luna', t: '13:43', text: '¿Alguien arma equipo para el coop? Me falta un sanador.' },
+  { c: 'c2', s: 'gc', ch: 'general', who: 'Mo', t: '13:43', text: '@Tito borra la caché, a mí me pasó igual.' },
+  { c: 'c4', s: 'id', ch: 'builds', who: 'Nico', t: '13:44', text: 'Probé la 0.4.2 en Windows: guarda bien.', thread: true },
+  { c: 'c1', s: 'gc', ch: 'general', who: 'yazz', t: '13:44', text: 'Por fin 😭 ahorro desde marzo.' },
+  { c: 'c3', s: 'gc', ch: 'general', who: 'Pablo', t: '13:45', text: 'Yo voy de sanador, pásame invitación.', reply: 3 },
+  { c: 'c2', s: 'gc', ch: 'general', who: 'Tito', t: '13:46', text: 'Era eso, gracias.' },
+  { c: 'c1', s: 'gc', ch: 'general', who: 'Kira', t: '13:47', text: 'Ojo: el rerun dura solo 7 días.' },
+  { c: 'c4', s: 'id', ch: 'builds', who: 'Luna', t: '13:48', text: 'En Linux también, cierro el ticket.', thread: true },
+  { c: 'c3', s: 'gc', ch: 'general', who: 'Luna', t: '13:49', text: 'Listo, somos cuatro. Salimos a las 21:00.', unread: true },
+  { c: 'c1', s: 'gc', ch: 'general', who: 'Mo', t: '13:50', text: '¿Alguien sabe si trae arma propia?', unread: true },
+];
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const laneColor = (c) => `var(--l${CONVS[c].lane})`;
+const src = (m) => `<span class="src"><i style="background:${SRC[m.s][1]}">${SRC[m.s][0].split(' ').map((w) => w[0]).join('')}</i>#${m.ch}</span>`;
+const entry = (m, i, extra = '') => `<div class="entry ${m.unread ? 'unread' : ''} ${extra}" data-i="${i}" data-c="${m.c}" style="--c:${laneColor(m.c)}">
+  <div class="av" style="background:hsl(${PEOPLE[m.who]} 55% 52%)">${m.who[0].toUpperCase()}</div>
+  <div><div class="h"><span class="who">${m.who}</span><span class="t">${m.t}</span>${src(m)}${m.reply != null ? `<span class="re">↳ responde a ${M[m.reply].who}</span>` : ''}</div><div class="txt">${esc(m.text)}</div></div></div>`;
+const label = (c, n, extra = '') => `<div class="convlabel ${extra}" data-c="${c}" style="--c:${laneColor(c)}">${CONVS[c].title} <span>· ${n} mensajes</span></div>`;
+const readerTop = () => `<div class="rtop"><h4>Gacha + Indie</h4><span class="count">2 nuevos</span><span class="grow"></span>${src(M[0])}${src(M[5])}</div>`;
+const countOf = (c) => M.filter((m) => m.c === c).length;
+
+/* ---------- A: git-style lanes ---------- */
+function renderLanes(root) {
+  // lane allocation like a git graph: a conversation holds a lane from its first to its last message
+  const first = {}, last = {};
+  M.forEach((m, i) => { first[m.c] ??= i; last[m.c] = i; });
+  const laneOf = {}, busy = [];
+  M.forEach((m, i) => {
+    if (first[m.c] === i) { let l = busy.findIndex((x) => !x); if (l < 0) l = busy.length; busy[l] = m.c; laneOf[m.c] = l; }
+    if (last[m.c] === i) busy[laneOf[m.c]] = null;
+  });
+  const lanes = Math.max(...Object.values(laneOf)) + 1;
+  const gut = 24 + lanes * 18;
+  let html = '';
+  M.forEach((m, i) => { if (first[m.c] === i) html += label(m.c, countOf(m.c)); html += entry(m, i); });
+  root.innerHTML = `<div class="reader lanes">${readerTop()}<div class="river" style="--gut:${gut}px">${html}<svg class="graph"></svg></div></div>`;
+  const river = root.querySelector('.river'), svg = river.querySelector('svg');
+  const draw = () => {
+    const rb = river.getBoundingClientRect();
+    svg.setAttribute('width', gut); svg.setAttribute('height', river.scrollHeight);
+    const x = (c) => 18 + laneOf[c] * 18;
+    const y = (i) => { const r = river.querySelector(`.entry[data-i="${i}"] .av`).getBoundingClientRect(); return r.top - rb.top + r.height / 2; };
+    let out = '';
+    for (const c of Object.keys(CONVS)) {
+      const idx = M.map((m, i) => (m.c === c ? i : -1)).filter((i) => i >= 0);
+      const lb = river.querySelector(`.convlabel[data-c="${c}"]`).getBoundingClientRect();
+      const y0 = lb.top - rb.top + lb.height / 2, y1 = y(idx.at(-1));
+      // branch in from the main line on the left, then run down the lane
+      out += `<path data-c="${c}" stroke="${laneColor(c)}" d="M4 ${y0 - 14} C 4 ${y0}, ${x(c)} ${y0 - 10}, ${x(c)} ${y0 + 6} L ${x(c)} ${y1}"/>`;
+      out += `<path data-c="${c}" stroke="${laneColor(c)}" d="M${x(c)} ${y0 + 4} L ${gut - 6} ${y0 + 4}" opacity=".35" stroke-dasharray="2 4"/>`;
+      for (const i of idx) out += `<circle data-c="${c}" cx="${x(c)}" cy="${y(i)}" r="${M[i].unread ? 6 : 4.5}" fill="${M[i].unread ? 'var(--unread)' : laneColor(c)}"/>`;
+      for (const i of idx) out += `<path data-c="${c}" stroke="${laneColor(c)}" d="M${x(c) + 6} ${y(i)} L ${gut - 6} ${y(i)}" opacity=".5"/>`;
+    }
+    out += `<path stroke="var(--line)" d="M4 0 L 4 ${river.scrollHeight}" style="stroke-width:2"/>`;
+    svg.innerHTML = out;
+  };
+  requestAnimationFrame(draw);
+  addEventListener('resize', draw);
+  const focus = (c) => {
+    river.querySelectorAll('.entry, .convlabel').forEach((e) => e.classList.toggle('dim', !!c && e.dataset.c !== c));
+    svg.querySelectorAll('[data-c]').forEach((p) => (p.style.opacity = !c || p.dataset.c === c ? '' : '.15'));
+  };
+  river.addEventListener('mouseover', (e) => { const t = e.target.closest('[data-c]'); focus(t?.dataset.c); });
+  river.addEventListener('mouseleave', () => focus(null));
+}
+
+/* ---------- B: conversation cards ---------- */
+function renderCards(root) {
+  const order = [...new Set([...M].reverse().map((m) => m.c))];
+  const html = order.map((c) => {
+    const ms = M.map((m, i) => [m, i]).filter(([m]) => m.c === c);
+    const shown = ms.length > 3 ? [ms[0], ...ms.slice(-2)] : ms;
+    const hidden = ms.length - shown.length;
+    return `<div class="conv" style="--c:${laneColor(c)}"><span class="last">${ms.at(-1)[0].t}</span>${label(c, ms.length)}
+      ${entry(...shown[0])}${hidden ? `<button class="more" data-more="${c}">··· ${hidden} mensajes más</button>` : ''}${shown.slice(1).map(([m, i]) => entry(m, i)).join('')}</div>`;
+  }).join('');
+  root.innerHTML = `<div class="reader cards">${readerTop()}<div class="river">${html}</div></div>`;
+  root.querySelectorAll('[data-more]').forEach((b) => (b.onclick = () => {
+    const c = b.dataset.more, conv = b.closest('.conv');
+    conv.innerHTML = `<span class="last">${M.filter((m) => m.c === c).at(-1).t}</span>${label(c, countOf(c))}` + M.map((m, i) => [m, i]).filter(([m]) => m.c === c).map(([m, i]) => entry(m, i)).join('');
+  }));
+}
+
+/* ---------- C: highlight on demand ---------- */
+function renderHighlight(root) {
+  root.innerHTML = `<div class="reader hl">${readerTop()}<div class="river">${M.map((m, i) => entry(m, i)).join('')}</div><div class="hint">clic en un mensaje → resalta su conversación · clic de nuevo → todo</div></div>`;
+  const r = root.querySelector('.hl');
+  r.addEventListener('click', (e) => {
+    const t = e.target.closest('.entry'); if (!t) return;
+    const same = r.classList.contains('focus') && t.classList.contains('on');
+    r.classList.toggle('focus', !same);
+    r.querySelectorAll('.entry').forEach((x) => x.classList.toggle('on', !same && x.dataset.c === t.dataset.c));
+  });
+}
+
+const OPTS = [
+  { key: 'A', name: 'Líneas', kicker: 'Como un historial de git', render: renderLanes, rec: true,
+    line: 'Cada conversación es una línea de color que nace, corre en paralelo a las demás y termina. Los mensajes son nodos sobre su línea. Leer el río en orden sigue funcionando, pero con un vistazo sabes a quién responde cada uno.',
+    pros: ['Mantiene el orden real del tiempo', 'Ves cuántas conversaciones hay vivas a la vez', 'Pasar el ratón aísla una conversación'],
+    cons: ['Con más de 5 conversaciones simultáneas se ensancha', 'Es lo más trabajoso de construir'], meta: 'Esfuerzo L · SVG dibujado en la extensión' },
+  { key: 'B', name: 'Conversaciones', kicker: 'Como un cliente de correo', render: renderCards,
+    line: 'Agrupa cada conversación en una tarjeta, ordenadas por actividad reciente. Muestra el inicio y lo último, y pliega el medio.',
+    pros: ['La lectura más tranquila', 'Ideal para ponerse al día de golpe'], cons: ['Pierdes el orden real: no ves qué pasó a la vez', 'Una deducción errónea esconde un mensaje en la tarjeta equivocada'], meta: 'Esfuerzo M' },
+  { key: 'C', name: 'Resaltado', kicker: 'Lista normal + foco', render: renderHighlight,
+    line: 'El río de siempre, con una franja de color fina por conversación. Un clic resalta su conversación y apaga el resto.',
+    pros: ['Lo más simple y discreto', 'Barato de construir'], cons: ['Hay que hacer clic para desenredar', 'El color solo de la franja se nota poco'], meta: 'Esfuerzo S' },
+];
+const DETECT = [
+  { key: 'A', name: 'Solo reglas', text: 'Las cuatro reglas, automáticas. Si fallan, el mensaje queda en una conversación equivocada.', rec: true },
+  { key: 'B', name: 'Reglas + corregir a mano', text: 'Además, puedes mover un mensaje a otra conversación o separarlo; la extensión lo recuerda.' },
+  { key: 'C', name: 'Reglas + IA después', text: 'Hoy reglas; más adelante, un modelo local revisa los casos dudosos (reglas 3 y 4).' },
+];
+const IDENT = [
+  { key: 'A', name: 'Sí, por ahí', text: 'La dirección RSS moderno es la buena. Pasa a un prototipo completo con ella.', rec: true },
+  { key: 'B', name: 'Más Discord', text: 'Me gusta, pero recupera más del aire de Discord (barra de servidores, etc.).' },
+  { key: 'C', name: 'Otra cosa', text: 'No me convence; lo explico en la nota.' },
+];
+const state = { 1: 'A', 2: 'A', 3: 'A', notes: {} };
+
+function drawOpt() {
+  const v = state.view ?? state[1];
+  const o = OPTS.find((x) => x.key === v);
+  document.getElementById('tabs').innerHTML = OPTS.map((x) => `<button class="tab" role="tab" aria-selected="${x.key === o.key}" data-tab="${x.key}"><small>${x.key} · ${x.kicker}</small><b>${x.name}${x.rec ? ' <span class="rec">★</span>' : ''}</b></button>`).join('');
+  o.render(document.getElementById('stage'));
+  document.getElementById('verdict').innerHTML = `<h3>${o.key} · ${o.name}${o.rec ? ' <span style="color:var(--signal);font-size:14px">recomendada</span>' : ''}</h3><p>${o.line}</p>
+    <ul class="pc pro">${o.pros.map((p) => `<li>${p}</li>`).join('')}</ul><ul class="pc con">${o.cons.map((p) => `<li>${p}</li>`).join('')}</ul><div class="meta">${o.meta}</div>
+    <button class="pick" data-pick="${o.key}" aria-pressed="${state[1] === o.key}">${state[1] === o.key ? 'Elegida' : `Elegir ${o.name}`}</button>
+    <textarea class="note" data-note="1${o.key}" placeholder="Nota sobre ${o.name} (aunque no la elijas)">${state.notes['1' + o.key] ?? ''}</textarea>`;
+  document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => { state.view = b.dataset.tab; drawOpt(); }));
+  document.querySelector('[data-pick]').onclick = () => { state[1] = o.key; drawOpt(); sync(); };
+  document.querySelector('[data-note]').oninput = (e) => { state.notes[e.target.dataset.note] = e.target.value.trim(); sync(); };
+}
+function drawChoices(id, n, list) {
+  const el = document.getElementById(id);
+  el.innerHTML = list.map((x) => `<button class="cbox" data-k="${x.key}" aria-pressed="${state[n] === x.key}"><small>${x.key}${x.rec ? ' · <span class="rec">recomendada</span>' : ''}</small><b>${x.name}</b><span>${x.text}</span></button>`).join('');
+  el.querySelectorAll('button').forEach((b) => (b.onclick = () => { state[n] = b.dataset.k; drawChoices(id, n, list); sync(); }));
+}
+document.getElementById('note-2').oninput = (e) => { state.notes[2] = e.target.value.trim(); sync(); };
+document.getElementById('note-3').oninput = (e) => { state.notes[3] = e.target.value.trim(); sync(); };
+
+function answer() {
+  const pick = (list, k) => list.find((x) => x.key === k);
+  const line = (n, title, list) => { const x = pick(list, state[n]); return `${n}${x.key} — ${title}: ${x.name}${x.rec ? ' (recommended)' : ''}`; };
+  const out = ['DECISIONS · feed-threads · round 1', '# Discord Feed: hilos e identidad', '', line(1, 'Cómo se ve una conversación', OPTS)];
+  for (const o of OPTS) if (state.notes['1' + o.key]) out.push(`   note on ${o.key}: ${state.notes['1' + o.key]}`);
+  out.push(line(2, 'Cómo se detecta cada conversación', DETECT));
+  if (state.notes[2]) out.push(`   note: ${state.notes[2]}`);
+  out.push(line(3, 'Identidad RSS moderno', IDENT));
+  if (state.notes[3]) out.push(`   note: ${state.notes[3]}`);
+  return out.join('\n');
+}
+function sync() {
+  const o = OPTS.find((x) => x.key === state[1]), d = DETECT.find((x) => x.key === state[2]), i = IDENT.find((x) => x.key === state[3]);
+  document.getElementById('sum').innerHTML = `<b>1${o.key}</b> ${o.name} · <b>2${d.key}</b> ${d.name} · <b>3${i.key}</b> ${i.name}`;
+  document.getElementById('out').value = answer();
+}
+document.getElementById('copy').onclick = async () => {
+  const out = document.getElementById('out'); out.hidden = false;
+  try { await navigator.clipboard.writeText(out.value); document.getElementById('copy').textContent = 'Copiado'; }
+  catch { out.select(); document.getElementById('copy').textContent = 'Selecciona y copia'; }
+};
+drawOpt(); drawChoices('detect', 2, DETECT); drawChoices('ident', 3, IDENT); sync();
+</script>

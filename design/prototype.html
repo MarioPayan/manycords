@@ -1,0 +1,469 @@
+<title>Discord Feed</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a reader. Sidebar (collections, sources, listening status) | river of entries with conversation lanes.
+   Identity: modern RSS — quiet surfaces, one violet signal, colour reserved for conversations. */
+:root {
+  --bg: #f5f6f8; --side: #eef0f3; --surface: #ffffff; --sunk: #e8ebf0; --ink: #14161b; --soft: #5b606d; --faint: #9095a3; --line: #e0e3e9;
+  --hover: #e6e9ee; --signal: #6b5cff; --signal-ink: #ffffff; --unread: #ff5d3a; --ok: #12a26b; --scrim: rgba(20,22,27,.45);
+  --l0: #6b5cff; --l1: #e8590c; --l2: #0ca678; --l3: #d6336c; --l4: #1c7ed6; --l5: #ae3ec9;
+  --sans: "Geist", "Segoe UI", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #23262e;
+  --hover: #1c1f26; --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97; --scrim: rgba(0,0,0,.6);
+  --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; --l4: #4dabf7; --l5: #da77f2; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0f1014; --side: #0b0c0f; --surface: #16181d; --sunk: #1d2027; --ink: #eef0f4; --soft: #a0a5b2; --faint: #6b707d; --line: #23262e;
+  --hover: #1c1f26; --signal: #9a8fff; --signal-ink: #0e0f13; --unread: #ff7a5c; --ok: #3ddc97; --scrim: rgba(0,0,0,.6);
+  --l0: #9a8fff; --l1: #ff922b; --l2: #38d9a9; --l3: #f06595; --l4: #4dabf7; --l5: #da77f2; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); overflow: hidden;
+  padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; background: none; padding: 0; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.app { height: 100%; display: grid; grid-template-columns: 272px minmax(0, 1fr); }
+@media (max-width: 760px) { .app { grid-template-columns: minmax(0, 1fr); } .side { display: none !important; } }
+.ic { width: 18px; height: 18px; display: block; }
+.mono { font-family: var(--mono); }
+
+/* ---------- sidebar ---------- */
+.side { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 10px; font-weight: 700; letter-spacing: -.01em; font-size: 16px; }
+.brand .mark { width: 26px; height: 26px; border-radius: 8px; background: var(--ink); color: var(--bg); display: grid; place-items: center; }
+.side-scroll { flex: 1; overflow-y: auto; padding: 4px 10px 16px; display: grid; align-content: start; gap: 2px; scrollbar-width: thin; }
+.group { display: flex; justify-content: space-between; align-items: center; padding: 14px 8px 6px; font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.group button { color: var(--faint); width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; }
+.group button:hover { color: var(--ink); background: var(--hover); }
+.item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 8px; color: var(--soft); text-align: left; }
+.item:hover { background: var(--hover); color: var(--ink); }
+.item.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 0 var(--line), 0 0 0 1px var(--line); font-weight: 600; }
+.item .em { width: 22px; text-align: center; font-size: 16px; flex: none; }
+.item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .n { font: 500 12px/1 var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+.item.unread .n { color: var(--unread); }
+.item.unread .nm { color: var(--ink); font-weight: 600; }
+.fav { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font: 700 8px/1 var(--sans); color: #fff; flex: none; letter-spacing: -.02em; }
+.status { margin: 8px 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+.status .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.status .row b { font-weight: 600; }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); animation: pulse 2s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.status small { color: var(--faint); font-size: 12px; margin-left: auto; font-family: var(--mono); }
+.spark { display: flex; gap: 2px; align-items: flex-end; height: 22px; }
+.spark i { flex: 1; border-radius: 1px; background: color-mix(in srgb, var(--ok) 70%, transparent); }
+.spark i.gap { background: var(--unread); height: 100% !important; }
+.status .legend { display: flex; justify-content: space-between; font: 11px/1 var(--mono); color: var(--faint); }
+.status .legend .g { color: var(--unread); }
+
+/* ---------- main ---------- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.head { padding: 22px 28px 14px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); background: var(--bg); flex: none; }
+.titlerow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.titlerow .em { font-size: 26px; }
+.titlerow h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iconbtn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--faint); flex: none; }
+.iconbtn:hover { color: var(--ink); background: var(--hover); }
+.grow { flex: 1; }
+.search { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); width: 220px; color: var(--faint); }
+.search:focus-within { border-color: var(--signal); }
+.search input { border: 0; background: none; outline: none; flex: 1; min-width: 0; font-size: 14px; color: var(--ink); }
+@media (max-width: 960px) { .search { width: 150px; } }
+.subrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--soft); }
+.newpill { font: 500 12px/1 var(--mono); color: var(--unread); background: color-mix(in srgb, var(--unread) 12%, transparent); padding: 5px 9px; border-radius: 99px; }
+.textbtn { font-size: 13px; font-weight: 600; color: var(--signal); padding: 4px 6px; border-radius: 6px; }
+.textbtn:hover { background: color-mix(in srgb, var(--signal) 10%, transparent); }
+.chipf { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 3px 4px 3px 10px; color: var(--ink); font-weight: 500; }
+.chipf .sw { width: 8px; height: 8px; border-radius: 50%; }
+.chipf button { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: var(--faint); }
+.chipf button:hover { background: var(--hover); color: var(--ink); }
+
+.scroll { flex: 1; overflow-y: auto; scrollbar-width: thin; }
+.river { position: relative; max-width: 860px; padding: 12px 28px 64px 0; margin-left: 14px; }
+.river svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.graph path { fill: none; stroke-width: 2.5; stroke-linecap: round; transition: opacity .15s; }
+.graph circle { stroke: var(--bg); stroke-width: 3; transition: opacity .15s; }
+.day { margin: 22px 0 6px var(--gut); font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; gap: 10px; }
+.day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.conv { margin: 14px 0 2px var(--gut); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; transition: opacity .15s; }
+.conv button { display: inline-flex; align-items: center; gap: 8px; font: 600 12px/1 var(--sans); color: var(--c); background: color-mix(in srgb, var(--c) 11%, transparent); padding: 6px 10px; border-radius: 8px; max-width: 100%; text-align: left; }
+.conv button:hover { background: color-mix(in srgb, var(--c) 18%, transparent); }
+.conv button .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.conv .cm { font: 500 11px/1 var(--mono); color: var(--faint); }
+.entry { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 8px 12px 8px 10px; margin-left: calc(var(--gut) - 10px); border-radius: 10px; transition: opacity .15s, background .15s; }
+.entry:hover { background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.entry .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font: 700 13px/1 var(--sans); color: #fff; margin-top: 1px; }
+.entry .h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.entry .who { font-weight: 650; font-weight: 600; }
+.entry .t { font: 12px/1 var(--mono); color: var(--faint); }
+.where { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--soft); }
+.where .fav { width: 14px; height: 14px; border-radius: 4px; font-size: 6px; }
+.entry .re { font-size: 12px; color: var(--faint); }
+.entry .txt { overflow-wrap: anywhere; white-space: pre-wrap; }
+.entry .txt .ment { color: var(--signal); font-weight: 500; }
+.entry.unread .who::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--unread); margin-left: 7px; vertical-align: 1px; }
+.entry.dim, .conv.dim, .day.dim { opacity: .22; }
+.file { margin-top: 6px; display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.file .ft { width: 26px; height: 30px; border-radius: 4px; background: var(--sunk); display: grid; place-items: center; font: 600 8px/1 var(--mono); color: var(--soft); }
+.file small { display: block; color: var(--faint); font: 11px/1.3 var(--mono); }
+.link { margin-top: 6px; border-left: 3px solid var(--line); padding: 2px 0 2px 10px; font-size: 13px; color: var(--soft); }
+.link b { color: var(--ink); display: block; }
+.tools { position: absolute; right: 8px; top: 6px; display: none; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.entry:hover .tools { display: flex; }
+.tools button { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: var(--faint); }
+.tools button:hover { color: var(--ink); background: var(--hover); }
+.endcap { margin: 28px 0 0 var(--gut); display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 13px; }
+.endcap .ok { width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); display: grid; place-items: center; }
+.empty { max-width: 420px; margin: 80px auto; text-align: center; display: grid; gap: 10px; justify-items: center; color: var(--soft); padding: 0 24px; }
+.empty h2 { margin: 0; color: var(--ink); font-size: 22px; letter-spacing: -.02em; }
+.empty p { margin: 0; }
+.btn { height: 38px; padding: 0 16px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+.btn.primary { background: var(--ink); color: var(--bg); }
+.btn.primary:hover { opacity: .88; }
+.btn.ghost { color: var(--soft); }
+.btn.ghost:hover { background: var(--hover); color: var(--ink); }
+.btn.danger { color: var(--unread); }
+.btn.danger:hover { background: color-mix(in srgb, var(--unread) 10%, transparent); }
+
+/* ---------- edit collection sheet ---------- */
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 20; display: grid; grid-template-rows: 100%; justify-items: end; animation: fade .15s ease; }
+@keyframes fade { from { opacity: 0 } }
+@keyframes slide { from { transform: translateX(24px); opacity: 0 } }
+.sheet { width: min(640px, 100%); height: 100%; min-height: 0; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; box-shadow: -24px 0 48px -24px rgba(0,0,0,.35); animation: slide .2s ease; }
+.sh-head { padding: 22px 24px 14px; display: grid; gap: 4px; position: relative; border-bottom: 1px solid var(--line); }
+.sh-head h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+.sh-head p { margin: 0; color: var(--soft); font-size: 14px; }
+.sh-head .x { position: absolute; right: 16px; top: 16px; }
+.sh-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; display: grid; gap: 22px; align-content: start; scrollbar-width: thin; }
+.lab { display: block; font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 8px; }
+.namerow { display: flex; gap: 8px; }
+.emo { width: 44px; height: 44px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 20px; flex: none; }
+.emo:hover { border-color: var(--faint); }
+.inp { width: 100%; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); padding: 0 14px; font-size: 16px; font-weight: 600; outline: none; }
+.inp:focus { border-color: var(--signal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 18%, transparent); }
+.pickhead { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.pickhead .inp { height: 36px; font-size: 14px; font-weight: 400; }
+.selc { font: 500 12px/1 var(--mono); color: var(--faint); white-space: nowrap; }
+.selc b { color: var(--ink); }
+.srccards { display: grid; gap: 10px; }
+.sc { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 12px; transition: border-color .15s; }
+.sc.active { border-color: color-mix(in srgb, var(--signal) 55%, var(--line)); }
+.sc-h { display: flex; align-items: center; gap: 12px; }
+.sc-h .fav { width: 36px; height: 36px; border-radius: 10px; font-size: 12px; }
+.sc-h div { flex: 1; min-width: 0; }
+.sc-h b { display: block; font-size: 15px; }
+.sc-h small { color: var(--faint); font: 12px/1.3 var(--mono); }
+.switch { width: 38px; height: 22px; border-radius: 11px; background: var(--sunk); position: relative; transition: background .15s; flex: none; box-shadow: inset 0 0 0 1px var(--line); }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.switch.on { background: var(--signal); box-shadow: none; }
+.switch.on::after { transform: translateX(16px); }
+.switch.part { background: color-mix(in srgb, var(--signal) 40%, var(--sunk)); box-shadow: none; }
+.switch.part::after { transform: translateX(8px); }
+.cg { display: grid; gap: 6px; }
+.cg > button { justify-self: start; font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cg > button:hover { color: var(--ink); }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill { height: 30px; padding: 0 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); font-size: 14px; display: inline-flex; align-items: center; gap: 4px; color: var(--soft); transition: all .12s; }
+.pill:hover { border-color: var(--faint); color: var(--ink); }
+.pill.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pill .nw { font: 600 9px/1 var(--mono); background: var(--unread); color: #fff; padding: 3px 5px; border-radius: 4px; }
+.sh-foot { padding: 14px 24px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; background: var(--bg); }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 500; z-index: 40; animation: fade .15s ease; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="mark"><svg class="ic" style="width:15px;height:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 19a1 1 0 1 0 0-.01"/><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/></svg></span>Discord Feed</div>
+    <div class="side-scroll" id="side"></div>
+    <div class="status" id="status"></div>
+  </aside>
+  <main class="main">
+    <div class="head" id="head"></div>
+    <div class="scroll" id="scroll"></div>
+  </main>
+</div>
+
+<script>
+/* ===== conversation rules (same code as threads.js in the extension) ===== */
+const IDLE = 10 * 60e3;
+function assignConversations(msgs, { isThread = () => false, threadName = () => null } = {}) {
+  const sorted = [...msgs].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  const convOf = new Map(), convs = new Map(), lastByAuthor = new Map();
+  const touch = (c, m, rule) => { convOf.set(m.id, c.id); c.last = Date.parse(m.timestamp); c.count++; c.rules[rule] = (c.rules[rule] ?? 0) + 1; lastByAuthor.set(`${m.channel_id}|${m.author?.id}`, c.id); };
+  const open = (id, m, title) => { const c = { id, channel_id: m.channel_id, title, first: Date.parse(m.timestamp), last: 0, count: 0, rules: {} }; convs.set(id, c); return c; };
+  const live = (id, t) => id && convs.has(id) && t - convs.get(id).last <= IDLE ? convs.get(id) : null;
+  for (const m of sorted) {
+    const t = Date.parse(m.timestamp);
+    if (m.reply_to && convOf.has(m.reply_to)) { touch(convs.get(convOf.get(m.reply_to)), m, 'reply'); continue; }
+    if (isThread(m.channel_id)) { const id = `thread:${m.channel_id}`; touch(convs.get(id) ?? open(id, m, threadName(m.channel_id) ?? excerpt(m.content)), m, 'thread'); continue; }
+    const mentioned = (m.mentions ?? []).map((u) => live(lastByAuthor.get(`${m.channel_id}|${u}`), t)).find(Boolean);
+    const followUp = mentioned ?? live(lastByAuthor.get(`${m.channel_id}|${m.author?.id}`), t);
+    if (followUp) { touch(followUp, m, mentioned ? 'mention' : 'author'); continue; }
+    touch(open(`c:${m.id}`, m, excerpt(m.content)), m, 'new');
+  }
+  return { convOf, convs };
+}
+const excerpt = (s = '') => { const c = s.replace(/\s+/g, ' ').trim(); return c.length > 48 ? `${c.slice(0, 47)}…` : c || 'Sin texto'; };
+
+/* ===== sample data (invented) ===== */
+const SOURCES = {
+  gc: { name: 'Gacha Club', color: '#e8590c', cats: { 'Información': ['anuncios', 'parches'], 'Charla': ['general', 'gachas', 'memes'] } },
+  id: { name: 'Indie Devs', color: '#1c7ed6', cats: { 'Comunidad': ['eventos', 'general'], 'Proyectos': ['builds', 'feedback', 'showcase'] } },
+  lr: { name: 'Liga Retro', color: '#2f9e44', cats: { '': ['torneos', 'resultados', 'charla'] } },
+  ap: { name: 'Arte Pixel', color: '#ae3ec9', cats: { 'Galería': ['wip', 'terminados'], 'Ayuda': ['dudas'] } },
+};
+const THREADS = { 'id/builds#042': 'Build 0.4.2' };
+const PEOPLE = { yazz: 265, Kira: 330, Nico: 190, Mo: 0, Luna: 300, Tito: 50, Pablo: 30, Vera: 140, Ada: 210 };
+const base = new Date(); base.setSeconds(0, 0);
+const ago = (min) => new Date(base - min * 60e3).toISOString();
+let seq = 0;
+const msg = (s, ch, who, minAgo, content, extra = {}) => ({ id: 'm' + seq++, s, channel_id: `${s}/${ch}`, author: { id: who, name: who }, timestamp: ago(minAgo), content, ...extra });
+const MSGS = [
+  msg('lr', 'torneos', 'Pablo', 1500, 'Inscripciones abiertas para el torneo del sábado. Cupo de 32.'),
+  msg('gc', 'anuncios', 'Kira', 1430, 'Mantenimiento mañana de 09:00 a 11:00. Compensación: 300 gemas.', { link: { site: 'gachaclub.example', title: 'Notas del mantenimiento' } }),
+  msg('lr', 'torneos', 'Ada', 1425, '¿Se puede jugar con mando de terceros?', { reply_to: 'm0' }),
+  msg('lr', 'torneos', 'Pablo', 1420, 'Sí, cualquier mando con cable.', { reply_to: 'm2' }),
+  msg('gc', 'general', 'yazz', 70, '¿El banner nuevo trae rerun de Aster?'),
+  msg('gc', 'general', 'Tito', 69, 'Me sale error 502 al entrar desde ayer.'),
+  msg('gc', 'general', 'Kira', 68, 'Sí, a partir del jueves.', { reply_to: 'm4' }),
+  msg('gc', 'general', 'Luna', 67, '¿Alguien arma equipo para el coop? Me falta un sanador.'),
+  msg('gc', 'general', 'Mo', 67, '@Tito borra la caché, a mí me pasó igual.', { mentions: ['Tito'] }),
+  msg('id', 'builds#042', 'Nico', 66, 'Probé la 0.4.2 en Windows: guarda bien.'),
+  msg('gc', 'general', 'yazz', 66, 'Por fin 😭 ahorro desde marzo.'),
+  msg('gc', 'general', 'Pablo', 65, 'Yo voy de sanador, pásame invitación.', { reply_to: 'm7' }),
+  msg('gc', 'general', 'Tito', 64, 'Era eso, gracias.'),
+  msg('gc', 'general', 'Kira', 63, 'Ojo: el rerun dura solo 7 días.'),
+  msg('id', 'builds#042', 'Vera', 62, 'En Linux también, cierro el ticket.', { file: { name: 'log-linux.txt', size: '4 KB' } }),
+  msg('gc', 'general', 'Luna', 61, 'Listo, somos cuatro. Salimos a las 21:00.'),
+  msg('gc', 'general', 'Mo', 60, '¿Alguien sabe si trae arma propia?', { reply_to: 'm13' }),
+  msg('id', 'eventos', 'Nico', 40, 'Game jam este finde 🎮 El tema se anuncia el viernes a las 20:00. @everyone'),
+  msg('gc', 'parches', 'Mo', 30, 'Parche 2.3: rerun de Aster, evento cooperativo y ajustes de balance.'),
+  msg('id', 'eventos', 'Ada', 22, '¿Equipos de cuántas personas?', { reply_to: 'm17' }),
+  msg('id', 'eventos', 'Nico', 20, 'Hasta 4. También se puede ir solo.', { reply_to: 'm19' }),
+  msg('ap', 'wip', 'Ada', 12, 'Primer boceto del tileset del bosque 🌲', { file: { name: 'bosque-v1.png', size: '312 KB' } }),
+  msg('gc', 'anuncios', 'Kira', 6, 'El mantenimiento se adelanta a las 08:30.'),
+];
+const ALLCH = Object.entries(SOURCES).flatMap(([s, src]) => Object.entries(src.cats).flatMap(([cat, chs]) => chs.map((c) => ({ s, cat, c, key: `${s}/${c}` }))));
+const NEWCH = new Set(['ap/terminados']);
+let cols = [
+  { id: 'all', name: 'Todo', emoji: '🌐', all: true, ids: [], readAt: Date.parse(ago(65)) },
+  { id: 'news', name: 'Anuncios', emoji: '📣', ids: ['gc/anuncios', 'gc/parches', 'id/eventos', 'lr/torneos'], readAt: Date.parse(ago(45)) },
+  { id: 'gacha', name: 'Gacha Club', emoji: '⭐', ids: ['gc/general', 'gc/anuncios', 'gc/parches', 'id/builds'], readAt: Date.parse(ago(66)) },
+  { id: 'art', name: 'Arte', emoji: '🎨', ids: ['ap/wip', 'ap/terminados'], readAt: Date.parse(ago(5)) },
+];
+const ui = { col: 'gacha', src: '', conv: '', q: '', edit: null, hover: null };
+
+/* ===== helpers ===== */
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const col = () => cols.find((c) => c.id === ui.col);
+const chanOf = (m) => m.channel_id.split('#')[0];
+const inCol = (c, m) => c.all || c.ids.includes(chanOf(m));
+const isUnread = (c, m) => Date.parse(m.timestamp) > c.readAt;
+const fav = (s, cls = '') => `<span class="fav ${cls}" style="background:${SOURCES[s].color}">${SOURCES[s].name.split(' ').map((w) => w[0]).join('')}</span>`;
+const hm = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const dayOf = (iso) => { const d = new Date(iso), y = new Date(base); y.setDate(y.getDate() - 1);
+  return d.toDateString() === base.toDateString() ? 'Hoy' : d.toDateString() === y.toDateString() ? 'Ayer' : d.toLocaleDateString(); };
+const fmt = (s) => esc(s).replace(/@(\w+)/g, '<span class="ment">@$1</span>');
+const I = {
+  pen: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  plus: '<svg class="ic" style="width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  x: '<svg class="ic" style="width:12px;height:12px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  search: '<svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  ext: '<svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>',
+  focus: '<svg class="ic" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M3 12h4M17 12h4M12 3v4M12 17v4"/></svg>',
+  sun: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  moon: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>',
+  check: '<svg class="ic" style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>',
+};
+const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+const { convOf, convs } = assignConversations(MSGS, { isThread: (ch) => !!THREADS[ch], threadName: (ch) => THREADS[ch] });
+
+/* ===== sidebar ===== */
+function renderSide() {
+  const unreadIn = (c, f = () => true) => MSGS.filter((m) => inCol(c, m) && isUnread(c, m) && f(m)).length;
+  const c = col();
+  const srcs = [...new Set(MSGS.filter((m) => inCol(c, m)).map((m) => m.s))];
+  if (ui.src && !srcs.includes(ui.src)) ui.src = '';
+  $('#side').innerHTML = `<div class="group"><span>Colecciones</span><button id="add" aria-label="Nueva colección" title="Nueva colección">${I.plus}</button></div>`
+    + cols.map((x) => { const n = unreadIn(x); return `<button class="item ${x.id === ui.col ? 'on' : ''} ${n ? 'unread' : ''}" data-col="${x.id}"><span class="em">${x.emoji}</span><span class="nm">${esc(x.name)}</span><span class="n">${n || ''}</span></button>`; }).join('')
+    + `<div class="group"><span>Fuentes en ${esc(c.name)}</span></div>`
+    + srcs.map((s) => { const n = unreadIn(c, (m) => m.s === s); return `<button class="item ${ui.src === s ? 'on' : ''} ${n ? 'unread' : ''}" data-src="${s}">${fav(s)}<span class="nm">${SOURCES[s].name}</span><span class="n">${n || ''}</span></button>`; }).join('');
+  $('#status').innerHTML = `<div class="row"><span class="pulse"></span><b>Escuchando</b><small>hace 4 s</small></div>
+    <div class="spark" title="Mensajes capturados por hora, últimas 24 h">${Array.from({ length: 36 }, (_, i) => (i === 9 || i === 10 ? '<i class="gap"></i>' : `<i style="height:${18 + ((i * 41) % 82)}%"></i>`)).join('')}</div>
+    <div class="legend"><span>-24 h</span><span class="g">hueco 03:10–03:40</span><span>ahora</span></div>`;
+}
+
+/* ===== header ===== */
+function renderHead(list) {
+  const c = col();
+  const n = list.filter((m) => isUnread(c, m)).length;
+  const chans = c.all ? ALLCH.length : c.ids.length;
+  const srcN = new Set((c.all ? ALLCH.map((x) => x.key) : c.ids).map((k) => k.split('/')[0])).size;
+  const chips = [];
+  if (ui.src) chips.push(`<span class="chipf">${fav(ui.src)}${SOURCES[ui.src].name}<button data-clear="src" aria-label="Quitar filtro">${I.x}</button></span>`);
+  if (ui.conv) chips.push(`<span class="chipf"><span class="sw" style="background:${laneVar(ui.conv)}"></span>${esc(convs.get(ui.conv).title)}<button data-clear="conv" aria-label="Quitar filtro">${I.x}</button></span>`);
+  if (ui.q) chips.push(`<span class="chipf">“${esc(ui.q)}”<button data-clear="q" aria-label="Quitar búsqueda">${I.x}</button></span>`);
+  $('#head').innerHTML = `<div class="titlerow"><span class="em">${c.emoji}</span><h1>${esc(c.name)}</h1><button class="iconbtn" id="edit" aria-label="Editar colección" title="Editar colección">${I.pen}</button>
+      <span class="grow"></span><label class="search">${I.search}<input id="q" placeholder="Buscar en ${esc(c.name)}" value="${esc(ui.q)}" aria-label="Buscar"></label>
+      <button class="iconbtn" id="theme" aria-label="Cambiar tema" title="Cambiar tema">${isDark() ? I.sun : I.moon}</button></div>
+    <div class="subrow">${n ? `<span class="newpill">${n} nuevos</span>` : '<span class="mono" style="font-size:12px">Al día</span>'}<span>${c.all ? 'Todas tus fuentes' : `${chans} canales · ${srcN} fuente${srcN > 1 ? 's' : ''}`}</span>
+      ${chips.join('')}<span class="grow"></span>${n ? '<button class="textbtn" id="markread">Marcar como leído</button>' : ''}</div>`;
+}
+
+/* ===== river with lanes ===== */
+const LANES = 6;
+let laneIdx = new Map();
+const laneVar = (cid) => `var(--l${(laneIdx.get(cid) ?? 0) % LANES})`;
+function renderRiver() {
+  const c = col(), q = ui.q.toLowerCase();
+  const list = MSGS.filter((m) => inCol(c, m) && (!ui.src || m.s === ui.src) && (!ui.conv || convOf.get(m.id) === ui.conv)
+    && (!q || `${m.content} ${m.author.name}`.toLowerCase().includes(q))).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  renderHead(list);
+  if (!c.all && !c.ids.length) {
+    $('#scroll').innerHTML = `<div class="empty"><svg width="96" height="72" viewBox="0 0 96 72" fill="none" stroke="currentColor" stroke-width="2" opacity=".5"><path d="M10 60c20 0 26-48 46-48s20 30 30 30"/><path d="M10 60c12 0 18-20 34-20s22 20 42 20"/><circle cx="10" cy="60" r="4"/><circle cx="86" cy="42" r="4"/></svg>
+      <h2>Esta colección está vacía</h2><p>Elige de qué fuentes y canales quieres leer. Solo se guardará lo que elijas.</p><button class="btn primary" id="emptyedit">Elegir canales</button></div>`;
+    return;
+  }
+  if (!list.length) { $('#scroll').innerHTML = `<div class="empty"><h2>Nada por aquí</h2><p>Ningún mensaje coincide con los filtros.</p></div>`; return; }
+
+  // git-graph lane allocation over the visible list: a conversation holds a lane from its first to its last visible message
+  const first = new Map(), last = new Map();
+  list.forEach((m, i) => { const k = convOf.get(m.id); if (!first.has(k)) first.set(k, i); last.set(k, i); });
+  const lane = new Map(), busy = [];
+  laneIdx = new Map([...first.keys()].map((k, i) => [k, i]));
+  list.forEach((m, i) => {
+    const k = convOf.get(m.id);
+    if (first.get(k) === i) { let l = busy.findIndex((x) => !x); if (l < 0) l = busy.length; busy[l] = k; lane.set(k, l); }
+    if (last.get(k) === i) busy[lane.get(k)] = null;
+  });
+  const width = Math.max(...lane.values()) + 1;
+  const gut = 30 + width * 16;
+  let html = '', lastDay = '';
+  list.forEach((m, i) => {
+    const k = convOf.get(m.id), cv = convs.get(k), d = dayOf(m.timestamp);
+    if (d !== lastDay) { html += `<div class="day">${d}</div>`; lastDay = d; }
+    if (first.get(k) === i) {
+      const visible = list.filter((x) => convOf.get(x.id) === k).length;
+      html += `<div class="conv" data-c="${k}" style="--c:${laneVar(k)}"><button data-focus="${k}" title="Ver solo esta conversación"><span class="tt">${k.startsWith('thread:') ? 'Hilo · ' : ''}${esc(cv.title)}</span></button><span class="cm">${visible} mensaje${visible > 1 ? 's' : ''} · #${chanOf(m).split('/')[1]} · ${SOURCES[m.s].name}</span></div>`;
+    }
+    const reply = m.reply_to && MSGS.find((x) => x.id === m.reply_to);
+    html += `<div class="entry ${isUnread(c, m) ? 'unread' : ''}" data-i="${i}" data-c="${k}">
+      <div class="av" style="background:hsl(${PEOPLE[m.author.name]} 55% 52%)">${m.author.name[0].toUpperCase()}</div>
+      <div><div class="h"><span class="who">${m.author.name}</span><span class="t">${hm(m.timestamp)}</span><span class="where">${fav(m.s)}#${chanOf(m).split('/')[1]}</span>${reply ? `<span class="re">↳ ${reply.author.name}</span>` : ''}</div>
+      <div class="txt">${fmt(m.content)}</div>
+      ${m.file ? `<div class="file"><span class="ft">${m.file.name.split('.').pop().toUpperCase()}</span><div>${esc(m.file.name)}<small>${m.file.size} · no analizado</small></div></div>` : ''}
+      ${m.link ? `<div class="link"><small class="mono">${m.link.site}</small><b>${esc(m.link.title)}</b></div>` : ''}</div>
+      <div class="tools"><button data-focus="${k}" title="Ver solo esta conversación" aria-label="Ver solo esta conversación">${I.focus}</button><button title="Abrir en Discord" aria-label="Abrir en Discord">${I.ext}</button></div></div>`;
+  });
+  html += `<div class="endcap"><span class="ok">${I.check}</span>Estás al día. Lo nuevo aparecerá aquí abajo.</div>`;
+  $('#scroll').innerHTML = `<div class="river" style="--gut:${gut}px">${html}<svg class="graph"></svg></div>`;
+  const river = $('.river'), svg = river.querySelector('svg.graph');
+  const draw = () => {
+    const rb = river.getBoundingClientRect();
+    svg.setAttribute('width', gut); svg.setAttribute('height', river.scrollHeight);
+    const x = (k) => 18 + lane.get(k) * 16;
+    const yOf = (el) => { const r = el.getBoundingClientRect(); return r.top - rb.top + r.height / 2; };
+    let out = `<path stroke="var(--line)" d="M6 0 L 6 ${river.scrollHeight}" style="stroke-width:2"/>`;
+    for (const k of first.keys()) {
+      const label = river.querySelector(`.conv[data-c="${k}"]`);
+      const nodes = [...river.querySelectorAll(`.entry[data-c="${k}"] .av`)];
+      const y0 = yOf(label), y1 = yOf(nodes.at(-1)), stroke = laneVar(k);
+      out += `<path data-c="${k}" stroke="${stroke}" d="M6 ${y0 - 12} C 6 ${y0}, ${x(k)} ${y0 - 6}, ${x(k)} ${y0 + 6} L ${x(k)} ${y1}"/>`;
+      for (const n of nodes) {
+        const y = yOf(n), un = n.closest('.entry').classList.contains('unread');
+        out += `<path data-c="${k}" stroke="${stroke}" opacity=".35" d="M${x(k)} ${y} L ${gut - 4} ${y}"/><circle data-c="${k}" cx="${x(k)}" cy="${y}" r="${un ? 5.5 : 4}" fill="${un ? 'var(--unread)' : stroke}"/>`;
+      }
+    }
+    svg.innerHTML = out;
+    applyHover();
+  };
+  requestAnimationFrame(draw);
+  window.onresize = draw;
+  const sc = $('#scroll');
+  const firstNew = river.querySelector('.entry.unread');
+  requestAnimationFrame(() => { firstNew ? firstNew.scrollIntoView({ block: 'center' }) : (sc.scrollTop = sc.scrollHeight); });
+}
+function applyHover() {
+  const k = ui.hover;
+  document.querySelectorAll('.river .entry, .river .conv').forEach((e) => e.classList.toggle('dim', !!k && e.dataset.c !== k));
+  document.querySelectorAll('.river svg.graph [data-c]').forEach((p) => (p.style.opacity = !k || p.dataset.c === k ? '' : '.12'));
+}
+const render = () => { renderSide(); renderRiver(); };
+
+/* ===== edit sheet ===== */
+const EMOJIS = ['📣', '⭐', '🎨', '🛠️', '🎮', '🔥', '📰', '🧪', '🌐', '💬'];
+function openEdit(isNew) {
+  const c = col();
+  ui.edit = { name: c.name, emoji: c.emoji, ids: new Set(c.ids), q: '', isNew };
+  drawSheet();
+  setTimeout(() => { const n = $('#cname'); n.focus(); if (isNew) n.select(); }, 40);
+}
+function drawSheet() {
+  const e = ui.edit, c = col(), q = e.q.toLowerCase();
+  const cards = Object.entries(SOURCES).map(([s, src]) => {
+    const all = ALLCH.filter((x) => x.s === s);
+    const shown = all.filter((x) => !q || x.c.includes(q) || src.name.toLowerCase().includes(q));
+    if (!shown.length) return '';
+    const on = all.filter((x) => e.ids.has(x.key)).length;
+    const groups = [...new Set(shown.map((x) => x.cat))].map((cat) => `<div class="cg">${cat ? `<button data-cat="${s}|${cat}" title="Marcar o desmarcar ${cat}">${cat}</button>` : ''}<div class="pills">${shown.filter((x) => x.cat === cat).map((x) =>
+      `<button class="pill ${e.ids.has(x.key) ? 'on' : ''}" data-pill="${x.key}" aria-pressed="${e.ids.has(x.key)}">#${x.c}${NEWCH.has(x.key) ? '<span class="nw">NUEVO</span>' : ''}</button>`).join('')}</div></div>`).join('');
+    return `<div class="sc ${on ? 'active' : ''}"><div class="sc-h">${fav(s)}<div><b>${src.name}</b><small>${on ? `${on} de ${all.length} canales` : `${all.length} canales`}</small></div>
+      <button class="switch ${on === all.length ? 'on' : on ? 'part' : ''}" data-all="${s}" role="switch" aria-checked="${on === all.length}" aria-label="Todos los canales de ${src.name}"></button></div>${groups}</div>`;
+  }).join('');
+  const html = `<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sht">
+    <div class="sh-head"><h2 id="sht">${e.isNew ? 'Nueva colección' : 'Editar colección'}</h2><p>${c.all ? 'Esta colección incluye siempre todas tus fuentes y canales.' : 'Elige qué canales lees aquí. Lo que no esté en ninguna colección no se guarda.'}</p>
+      <button class="iconbtn x" id="sclose" aria-label="Cerrar">${I.x.replace(/12px/g, '16px')}</button></div>
+    <div class="sh-body">
+      <div><label class="lab" for="cname">Nombre</label><div class="namerow"><button class="emo" id="emo" title="Cambiar icono" aria-label="Cambiar icono">${e.emoji}</button><input class="inp" id="cname" maxlength="40" value="${esc(e.name)}"></div></div>
+      ${c.all ? '' : `<div><label class="lab" for="sq">Fuentes y canales</label><div class="pickhead"><input class="inp" id="sq" placeholder="Buscar fuente o canal" value="${esc(e.q)}"><span class="selc"><b>${e.ids.size}</b> canales</span></div><div class="srccards">${cards}</div></div>`}
+    </div>
+    <div class="sh-foot">${e.isNew || c.all ? '' : '<button class="btn danger" id="sdel">Eliminar</button>'}<span class="grow"></span><button class="btn ghost" id="scancel">Cancelar</button><button class="btn primary" id="sdone">Listo</button></div>
+  </div></div>`;
+  const old = $('#scrim');
+  if (old) { const st = old.querySelector('.sh-body').scrollTop; old.outerHTML = html; $('#scrim .sh-body').scrollTop = st; $('#scrim').style.animation = 'none'; $('#scrim .sheet').style.animation = 'none'; }
+  else document.body.insertAdjacentHTML('beforeend', html);
+}
+const closeSheet = () => { ui.edit = null; $('#scrim')?.remove(); };
+const toast = (t) => { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.append(d); setTimeout(() => d.remove(), 1800); };
+
+/* ===== events ===== */
+document.addEventListener('click', (ev) => {
+  const b = ev.target.closest('button'); if (!b) return;
+  const e = ui.edit;
+  if (b.dataset.col) { ui.col = b.dataset.col; ui.src = ui.conv = ui.q = ''; render(); }
+  else if (b.dataset.src) { ui.src = ui.src === b.dataset.src ? '' : b.dataset.src; ui.conv = ''; render(); }
+  else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; ui.hover = null; renderRiver(); }
+  else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
+  else if (b.id === 'markread') { col().readAt = Date.now(); render(); toast('Marcado como leído aquí. En Discord no cambia nada.'); }
+  else if (b.id === 'theme') { document.documentElement.dataset.theme = isDark() ? 'light' : 'dark'; render(); }
+  else if (b.id === 'edit' || b.id === 'emptyedit') openEdit(false);
+  else if (b.id === 'add') { const c = { id: 'c' + Date.now(), name: 'Nueva colección', emoji: '⭐', ids: [], readAt: 0 }; cols.push(c); ui.col = c.id; ui.src = ui.conv = ''; render(); openEdit(true); }
+  else if (e && b.dataset.pill) { e.ids.has(b.dataset.pill) ? e.ids.delete(b.dataset.pill) : e.ids.add(b.dataset.pill); drawSheet(); }
+  else if (e && (b.dataset.cat || b.dataset.all)) {
+    const ks = b.dataset.cat ? ALLCH.filter((x) => `${x.s}|${x.cat}` === b.dataset.cat).map((x) => x.key) : ALLCH.filter((x) => x.s === b.dataset.all).map((x) => x.key);
+    const full = ks.every((k) => e.ids.has(k)); ks.forEach((k) => (full ? e.ids.delete(k) : e.ids.add(k))); drawSheet(); }
+  else if (e && b.id === 'emo') { e.name = $('#cname').value; e.emoji = EMOJIS[(EMOJIS.indexOf(e.emoji) + 1) % EMOJIS.length]; drawSheet(); }
+  else if (b.id === 'sclose' || b.id === 'scancel') { if (e?.isNew) { cols = cols.filter((c) => c.id !== ui.col); ui.col = cols[0].id; } closeSheet(); render(); }
+  else if (b.id === 'sdone') { const c = col(); c.name = $('#cname').value.trim() || 'Sin nombre'; c.emoji = e.emoji; if (!c.all) c.ids = [...e.ids]; closeSheet(); render(); toast(`«${c.name}» lista`); }
+  else if (b.id === 'sdel') { const n = col().name; cols = cols.filter((c) => c.id !== ui.col); ui.col = cols[0].id; closeSheet(); render(); toast(`«${n}» eliminada`); }
+});
+document.addEventListener('input', (ev) => {
+  if (ev.target.id === 'q') { ui.q = ev.target.value; renderRiver(); const i = $('#q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+  if (ev.target.id === 'sq') { ui.edit.q = ev.target.value; ui.edit.name = $('#cname').value; drawSheet(); const i = $('#sq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+});
+document.addEventListener('keydown', (ev) => { if (!ui.edit) return; if (ev.key === 'Escape') $('#scancel').click(); if (ev.key === 'Enter' && ev.target.id === 'cname') $('#sdone').click(); });
+document.addEventListener('mousedown', (ev) => { if (ev.target.id === 'scrim') $('#scancel').click(); });
+document.addEventListener('mouseover', (ev) => {
+  const t = ev.target.closest('.river [data-c]'); const k = t ? t.dataset.c : null;
+  if (k !== ui.hover) { ui.hover = k; applyHover(); }
+});
+render();
+</script>

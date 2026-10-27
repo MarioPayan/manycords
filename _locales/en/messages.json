@@ -394,7 +394,7 @@
     "message": "Delete all messages"
   },
   "appName": {
-    "message": "Discord Feed"
+    "message": "ManyCords"
   },
   "appDescription": {
     "message": "Passively saves messages from selected server channels while a Discord tab is open."

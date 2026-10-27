@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>Five cords flowing into one stream</title>
+  <rect width="128" height="128" rx="28" fill="#14161b"/>
+  <g stroke-width="7" stroke-linecap="round">
+    <path d="M26 28H38C60 28 58 64 82 64" stroke="#6b5cff"/>
+    <path d="M26 46H39C59 46 62 64 82 64" stroke="#e8590c"/>
+    <path d="M26 100H38C60 100 58 64 82 64" stroke="#1c7ed6"/>
+    <path d="M26 82H39C59 82 62 64 82 64" stroke="#d6336c"/>
+    <path d="M26 64H82" stroke="#0ca678"/>
+    <path d="M82 64H103" stroke="#6b5cff"/>
+  </g>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>Three cords flowing into one stream</title>
+  <rect width="128" height="128" rx="24" fill="#14161b"/>
+  <g stroke-width="12" stroke-linecap="round">
+    <path d="M24 32H36C58 32 58 64 80 64" stroke="#e8590c"/>
+    <path d="M24 96H36C58 96 58 64 80 64" stroke="#0ca678"/>
+    <path d="M24 64H104" stroke="#6b5cff"/>
+  </g>
+</svg>

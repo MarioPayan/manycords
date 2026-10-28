@@ -18,6 +18,16 @@ In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load 
 
 In Firefox, open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select `dist/firefox/manifest.json`. Temporary add-ons disappear when Firefox restarts. Use Firefox 128 or newer; permanent installation requires Firefox signing.
 
+### Install from a release (no build)
+
+Each [GitHub release](https://github.com/MarioPayan/manycords/releases/latest) attaches ready-built archives, so another computer needs neither Node nor a clone.
+
+1. Download `discord-feed-chrome-<version>.zip` from the latest release and extract it to a folder you will keep; Chrome loads the extension from that folder on every start.
+2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the extracted folder (the one containing `manifest.json`).
+3. To update, download the newer zip, replace the folder’s contents, and click the extension’s reload button on `chrome://extensions`. Captured data is kept.
+
+Each browser captures and stores its own data; nothing syncs between computers. The Chrome Web Store version, once published, is a separate extension with its own storage, so remove the unpacked copy when you switch.
+
 Open or reload a Discord tab and click the extension’s toolbar action to open the reader. Keep Discord open to capture new activity. Existing channel history is not fetched. A new gateway session records a possible coverage gap; a resumed session records that Discord replayed missed events. The listening indicator and hourly coverage chart describe what the extension observed, not guaranteed complete history.
 
 ## Development

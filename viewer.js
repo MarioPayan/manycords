@@ -28,7 +28,7 @@ const hm = (date) => new Date(date).toLocaleTimeString([], { hour: '2-digit', mi
 const THREAD_TYPES = [10, 11, 12], NOT_LISTENABLE = [4, ...THREAD_TYPES], MAX_SHOWN = 400;
 const EMOJIS = ['\u{1f4e3}', '\u2b50', '\u{1f3a8}', '\u{1f6e0}', '\u{1f3ae}', '\u{1f4c1}'];
 let S = { collections: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], stats: {}, buckets: Array(24).fill(0), people: new Map() };
-const ui = { collection: null, src: '', conv: '', q: '', edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
+const ui = { hover: null, collection: null, src: '', conv: '', q: '', edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
 const collection = () => S.collections.find((c) => c.id === ui.collection);
 const isThread = (id) => THREAD_TYPES.includes(S.chans[id]?.type);
 const baseChannel = (m) => isThread(m.channel_id) ? S.chans[m.channel_id]?.parent_id : m.channel_id;
@@ -259,17 +259,17 @@ function draw() {
     const members = list.filter((m) => m.channel_id === id);
     if (!members.length) {
       const branches = [...convs.values()].filter((lane) => lane.parent_id === id).map((lane) => y(labels.get(lane.id)));
-      line({ stroke: laneColor(id), d: `M3 ${Math.min(...branches) - 24} Q${x(id)} ${Math.min(...branches) - 24} ${x(id)} ${Math.min(...branches) - 12} L${x(id)} ${Math.max(...branches) - 12}` });
+      line({ 'data-c': id, stroke: laneColor(id), d: `M3 ${Math.min(...branches) - 24} Q${x(id)} ${Math.min(...branches) - 24} ${x(id)} ${Math.min(...branches) - 12} L${x(id)} ${Math.max(...branches) - 12}` });
       continue;
     }
     const start = y(labels.get(id)), end = y(entries.get(members.at(-1).id));
     const parent = convs.get(id).parent_id;
     const origin = parent ? x(parent) : 3;
-    line({ stroke: laneColor(id), d: `M${origin} ${start - 12} Q${x(id)} ${start - 12} ${x(id)} ${start + 6} L${x(id)} ${end}` });
+    line({ 'data-c': id, stroke: laneColor(id), d: `M${origin} ${start - 12} Q${x(id)} ${start - 12} ${x(id)} ${start + 6} L${x(id)} ${end}` });
     for (const m of members) {
       const top = y(entries.get(m.id));
-      line({ stroke: laneColor(id), opacity: '.3', d: `M${x(id)} ${top} L${gut - 5} ${top}` });
-      wanted.set(m.id, { cx: x(id), cy: top, r: 4, fill: laneColor(id) });
+      line({ 'data-c': id, stroke: laneColor(id), opacity: '.3', d: `M${x(id)} ${top} L${gut - 5} ${top}` });
+      wanted.set(m.id, { 'data-c': id, cx: x(id), cy: top, r: 4, fill: laneColor(id) });
     }
   }
   for (const reply of replies) {
@@ -286,6 +286,12 @@ function draw() {
     const dot = shape('circle', attrs); if (arrivals.has(id)) dot.classList.add('pop');
     dotById.set(id, dot); dots.append(dot);
   }
+  applyHover();
+}
+// Hovering a message or conversation label dims every other conversation. The gaps between messages keep the current
+// conversation, so moving from one message to the next never flashes the whole feed back to full opacity.
+function applyHover() {
+  for (const node of document.querySelectorAll('.river [data-c]')) node.classList.toggle('dim', !!ui.hover && node.dataset.c !== ui.hover);
 }
 const newestEdgeGap = (s) => S.direction === 'top' ? s.scrollTop : s.scrollHeight - s.clientHeight - s.scrollTop;
 // scrollTop is mid-flight during a smooth scroll, so "at the edge" is a remembered state, not a render-time reading.
@@ -367,12 +373,12 @@ function renderRiver() {
     if (!labels.has(m.channel_id)) {
       const title = `${isThread(m.channel_id) ? t('threadPrefix') : ''}#${chanName(m.channel_id)}`;
       const meta = `${guildName(m.guild_id)}${isThread(m.channel_id) ? ` \u00b7 #${chanName(S.chans[m.channel_id]?.parent_id)}` : ''} \u00b7 ${t(convs.get(m.channel_id).count === 1 ? 'messageCountOne' : 'messageCountMany', [convs.get(m.channel_id).count])}`;
-      const label = keyed(`conv:${m.channel_id}`, JSON.stringify([title, meta, m.guild_id, S.icons[m.guild_id]]), () => el('div', { class: 'conv', style: { '--c': laneColor(m.channel_id) } }, button([fav(m.guild_id), el('span', { class: 'tt' }, title)], { 'data-focus': m.channel_id, title: t('focusChannel') }), el('span', { class: 'cm' }, meta)));
+      const label = keyed(`conv:${m.channel_id}`, JSON.stringify([title, meta, m.guild_id, S.icons[m.guild_id]]), () => el('div', { class: 'conv', 'data-c': m.channel_id, style: { '--c': laneColor(m.channel_id) } }, button([fav(m.guild_id), el('span', { class: 'tt' }, title)], { 'data-focus': m.channel_id, title: t('focusChannel') }), el('span', { class: 'cm' }, meta)));
       labels.set(m.channel_id, label); feed.push(label);
     }
     const reply = byId.get(m.reply_to), fresh = !riverNodes.has(`m:${m.id}`);
     const entry = keyed(`m:${m.id}`, messageSignature(m, reply), () => messageNode(m, reply));
-    entry.classList.toggle('unread', isUnread(c, m));
+    entry.classList.toggle('unread', isUnread(c, m)); entry.dataset.c = m.channel_id;
     entry.setAttribute('aria-posinset', index + 1); entry.setAttribute('aria-setsize', list.length);
     // Only messages newer than anything already on screen animate: never opening, filtering or expanding.
     if (fresh && !changed && time > ui.newestShown) { entry.classList.add('arrive'); arrivals.add(m.id); }
@@ -530,7 +536,7 @@ async function click(event) {
   if (b.id === 'menubtn' || b.id === 'mobilemenu') { menu.hidden = !menu.hidden; $('#menubtn').setAttribute('aria-expanded', String(!menu.hidden)); }
   else if (b.dataset.collection) { ui.collection = b.dataset.collection; ui.src = ui.conv = ui.q = ''; ui.feedKey = null; await refresh(true); }
   else if (b.dataset.src) { ui.src = ui.src === b.dataset.src ? '' : b.dataset.src; ui.conv = ''; render(); }
-  else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; renderRiver(); }
+  else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; ui.hover = null; renderRiver(); }
   else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
   else if (b.dataset.gap) showRecovery(S.events.find((event) => event.type === 'gap' && String(event.from) === b.dataset.gap));
   else if (b.id === 'markread') await markRead();
@@ -598,6 +604,12 @@ document.addEventListener('keydown', (event) => {
     next?.focus({ preventScroll: true }); next?.scrollIntoView({ block: 'nearest' });
   }
 });
+document.addEventListener('mouseover', (event) => {
+  if (!event.target.closest?.('.river')) { if (ui.hover) { ui.hover = null; applyHover(); } return; }
+  const id = event.target.closest('[data-c]')?.dataset.c;
+  if (id && id !== ui.hover) { ui.hover = id; applyHover(); }
+});
+document.addEventListener('mouseleave', () => { if (ui.hover) { ui.hover = null; applyHover(); } });
 document.addEventListener('mousedown', (event) => { if (event.target.id === 'scrim') cancelSheet().catch(reportError); });
 const command = async (kind) => { const result = await api.runtime.sendMessage({ kind }); if (result?.error) throw new Error(result.error); await refresh(true); };
 let refreshing = Promise.resolve();

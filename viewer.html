@@ -106,16 +106,18 @@
     .scroll { flex: 1; overflow-y: auto; scrollbar-width: thin; }
     .river { position: relative; max-width: 860px; padding: 12px 28px 64px 0; margin-left: 14px; }
     .river svg.graph { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; overflow-anchor: none; }
-    .graph path { fill: none; stroke-width: 2.5; stroke-linecap: round; }
-    .graph circle { stroke: var(--bg); stroke-width: 3; }
+    .graph path { fill: none; stroke-width: 2.5; stroke-linecap: round; transition: opacity .15s; }
+    .graph circle { stroke: var(--bg); stroke-width: 3; transition: opacity .15s; }
     .day { margin: 22px 0 6px var(--gut); font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; gap: 10px; }
     .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-    .conv { margin: 14px 0 2px var(--gut); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .conv { margin: 14px 0 2px var(--gut); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; transition: opacity .15s; }
     .conv button { display: inline-flex; align-items: center; gap: 8px; font: 600 12px/1.2 var(--sans); color: var(--c); background: color-mix(in srgb, var(--c) 11%, transparent); padding: 6px 10px; border-radius: 8px; max-width: 100%; text-align: left; }
     .conv button:hover { background: color-mix(in srgb, var(--c) 18%, transparent); }
     .conv button .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 420px; }
     .conv .cm { font: 500 11px/1 var(--mono); color: var(--faint); }
-    .entry { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 8px 12px 8px 10px; margin-left: calc(var(--gut) - 10px); border-radius: 10px; transition: background .15s; }
+    .entry { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 8px 12px 8px 10px; margin-left: calc(var(--gut) - 10px); border-radius: 10px; transition: opacity .15s, background .15s; }
+    .entry.dim, .conv.dim { opacity: .22; }
+    .graph .dim { opacity: .12; }
     .entry:hover { background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
     .entry .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font: 700 13px/1 var(--sans); color: #fff; margin-top: 1px; object-fit: cover; background: hsl(var(--h, 230) 45% 52%); }
     .entry .h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }

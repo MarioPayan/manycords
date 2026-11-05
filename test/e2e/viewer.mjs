@@ -61,17 +61,22 @@ const lateImage = async (page, name) => {
 };
 const caughtUp = async (page) => { await page.click('#markread'); await page.waitForFunction(() => document.querySelectorAll('.entry').length >= 50); await settle(page); };
 const sections = {
-  async 'hover changes nothing but the hovered message'(page) {
-    const opacities = () => page.$$eval('.entry, .conv, .graph path, .graph circle', (nodes) => nodes.map((node) => getComputedStyle(node).opacity));
-    const before = await opacities();
+  async 'hover dims other conversations without flashing'(page) {
+    const hovered = await page.locator('.entry[data-id="m13"]').getAttribute('data-c');
     await page.locator('.entry[data-id="m13"]').hover();
     await page.waitForTimeout(300);
-    assert.deepEqual(await opacities(), before, 'hovering leaves every computed opacity unchanged');
+    const states = await page.$$eval('.river .entry, .river .conv', (nodes) => nodes.map((node) => [node.dataset.c, getComputedStyle(node).opacity]));
+    assert.ok(states.some(([c]) => c !== hovered), 'the fixture has another conversation to dim');
+    for (const [c, opacity] of states) assert.equal(opacity === '1', c === hovered, `conversation ${c} has opacity ${opacity}`);
     assert.equal(await page.locator('.entry[data-id="m13"] .tools').isVisible(), true, 'the hovered message still shows its tools');
     await page.locator('.entry[data-id="m13"] [data-focus]').click();
     assert.deepEqual(await entryIds(page), ['m13'], 'the focus button still filters to the channel');
     await page.locator('[data-clear="conv"]').click();
     assert.equal(await page.locator('.entry').count(), 8);
+    // The pointer crosses margins and day separators between messages; none of them may undim the feed.
+    await page.locator('.river .entry').first().hover();
+    const start = await page.locator('.river .entry').first().boundingBox(), box = await page.locator('.river').boundingBox(), dimmed = () => page.$$eval('.river .dim', (nodes) => nodes.length);
+    for (let y = start.y + 4; y < Math.min(box.y + box.height, 840); y += 3) { await page.mouse.move(box.x + 120, y); assert.ok(await dimmed() > 0, `nothing dimmed at y=${y}`); }
   },
   async 'revisions and read state keep every node, scroll, focus and typed text'(page) {
     await page.setViewportSize({ width: 1360, height: 500 });

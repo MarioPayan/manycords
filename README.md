@@ -65,6 +65,24 @@ npm run lint
 
 `lint` invokes `npx web-ext`, which may need to download that development CLI. The build script uses only Node built-ins. It copies an explicit allowlist of extension files into `dist/chrome/` and `dist/firefox/`; it excludes design references, tests, scripts, package metadata and documentation. Chrome uses a service worker; Firefox uses an ordered background script list. If the `zip` CLI is available, the build also creates `dist/discord-feed-<browser>-<version>.zip`.
 
+## Publishing to the stores
+
+Bump `version` in `manifest.json` and `package.json`, run `npm run build`, then publish a GitHub release tagged `v<version>` with both zips from `dist/` attached. `.github/workflows/publish-stores.yml` then sends those zips to the Chrome Web Store and Firefox Add-ons for review. It stops if the zip's version does not match the tag, and each store runs as its own job, so one failing does not block the other. Each store rejects a version it already has, so a re-run only succeeds for the store that failed.
+
+- A release marked as a pre-release stays off the stores.
+- To send an existing release, run the workflow by hand: `gh workflow run publish-stores.yml -f tag=v0.2.0`. This starts a real submission.
+
+Secrets, set with `gh secret set <NAME>`:
+
+| Secret | Where it comes from |
+|---|---|
+| `CWS_EXTENSION_ID` | The item's ID in the Chrome Web Store developer dashboard |
+| `CWS_PUBLISHER_ID` | The publisher ID in the dashboard's account settings |
+| `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN` | A Google Cloud OAuth client with the Chrome Web Store API enabled ([guide](https://github.com/fregante/chrome-webstore-upload-keys)) |
+| `AMO_JWT_ISSUER`, `AMO_JWT_SECRET` | [AMO API credentials](https://addons.mozilla.org/developers/addon/api/key/) |
+
+Publish the OAuth consent screen to **In production** before generating the refresh token: while it is in Testing, the token reportedly expires after 7 days.
+
 ## Architecture
 
 `manifest.json` declares the two content scripts, permissions, browser backgrounds and localized extension metadata. The source manifest contains both background forms; the build selects the appropriate form for each browser.

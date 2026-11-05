@@ -32,6 +32,10 @@ function readHighWater(messages, readAt, seen) {
   }
   return next;
 }
+// Newest-first reader at the top: seeing a message settles everything older, seen or not.
+function readThrough(messages, readAt, seen) {
+  return messages.reduce((next, m) => seen.has(m.id) ? Math.max(next, Date.parse(m.timestamp)) : next, readAt);
+}
 function readingOrder(messages, readAt, expanded = false) {
   const sorted = [...messages].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || String(a.id).localeCompare(String(b.id)));
   const earlier = sorted.filter((m) => Date.parse(m.timestamp) <= readAt);
@@ -75,4 +79,4 @@ function markdownTokens(value, depth = 0) {
   if (end < text.length) tokens.push({ type: 'text', text: text.slice(end) });
   return tokens;
 }
-if (typeof module !== 'undefined') module.exports = { assignConversations, laneIndex, readHighWater, readingOrder, displayBoundary, markdownTokens, safeLink };
+if (typeof module !== 'undefined') module.exports = { assignConversations, laneIndex, readHighWater, readThrough, readingOrder, displayBoundary, markdownTokens, safeLink };

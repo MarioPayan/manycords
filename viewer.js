@@ -414,7 +414,9 @@ async function sampleReading() {
     } else ui.visibleSince.delete(id);
   }
   for (const id of ui.visibleSince.keys()) if (!present.has(id)) ui.visibleSince.delete(id);
-  const next = readHighWater(S.msgs.filter((m) => inCollection(c, m)), c.readAt ?? 0, ui.seen);
+  // A filter hides unread messages, so only the whole feed at its newest edge may settle them unseen.
+  const settles = S.direction === 'top' && ui.follow && !ui.src && !ui.conv && !ui.q;
+  const next = (settles ? readThrough : readHighWater)(S.msgs.filter((m) => inCollection(c, m)), c.readAt ?? 0, ui.seen);
   if (next > (c.readAt ?? 0)) {
     c.readAt = next; savingRead = true;
     try { await saveCollections(); } finally { savingRead = false; }

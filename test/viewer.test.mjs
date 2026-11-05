@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 const context = { module: { exports: {} }, URL };
 vm.runInNewContext(readFileSync('threads.js', 'utf8'), context);
-const { laneIndex, assignConversations, readHighWater, readingOrder, displayBoundary, markdownTokens, safeLink } = context.module.exports;
+const { laneIndex, assignConversations, readHighWater, readThrough, readingOrder, displayBoundary, markdownTokens, safeLink } = context.module.exports;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const message = (id, time, channel_id = 'a', extra = {}) => ({ id, channel_id, timestamp: new Date(time).toISOString(), ...extra });
 
@@ -29,6 +29,13 @@ test('read high-water stops at every unseen predecessor and advances only forwar
   assert.equal(readHighWater([...rows, message('peer', 20)], 10, new Set(['a', 'b', 'c'])), 10, 'timestamp peers must all be seen');
   assert.equal(readHighWater([...rows, message('peer', 20)], 10, new Set(['b', 'c', 'peer'])), 30);
   assert.equal(readHighWater([...rows, message('hidden-channel', 15, 'other')], 10, new Set(['b', 'c'])), 10, 'filtered-out unread messages still block readAt');
+});
+
+test('read-through settles everything up to the newest seen message and never moves back', () => {
+  const rows = [message('a', 10), message('b', 20), message('c', 30)];
+  assert.equal(readThrough(rows, 0, new Set(['b'])), 20, 'unseen older messages are settled');
+  assert.equal(readThrough(rows, 25, new Set(['b'])), 25);
+  assert.equal(readThrough(rows, 5, new Set()), 5);
 });
 
 test('unread starts at the top, earlier read expands chronologically, all-read ends with fifty', () => {

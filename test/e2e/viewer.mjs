@@ -281,6 +281,29 @@ const sections = {
     await page.locator('.entry[data-id="next"]').waitFor();
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.arrive')].map((node) => node.dataset.id)), ['next'], 'reused nodes do not animate again');
   },
+  async 'being at the top reads everything; filters and chat style still need each message seen'(page) {
+    await page.setViewportSize({ width: 1360, height: 420 });
+    const readAt = () => page.evaluate(async () => (await browser.storage.local.get('collections')).collections[0].readAt);
+    const newest = await page.locator('.entry[data-id="m14"] time').evaluate((node) => Date.parse(node.dateTime));
+    const oldest = page.locator('.entry[data-id="m7"]');
+    await page.locator('.conv button[data-focus="gen"]').first().click();
+    await page.waitForTimeout(1500);
+    assert.ok(await readAt() < newest, 'a channel filter does not settle messages it hides');
+    await page.locator('[data-clear="conv"]').click();
+    assert.equal(await oldest.evaluate((node) => node.getBoundingClientRect().top > document.querySelector('#scroll').getBoundingClientRect().bottom), true, 'the oldest unread is off screen');
+    await page.locator('.newpill').waitFor({ state: 'detached' });
+    assert.equal(await readAt(), newest, 'read state reaches the newest message');
+    assert.equal(await page.locator('.entry').count(), 8, 'reading does not collapse the feed');
+    assert.equal(await page.locator('.entry.unread').count(), 0);
+  },
+  async 'chat style still advances read state only through seen messages'(page) {
+    await page.setViewportSize({ width: 1360, height: 420 });
+    await page.evaluate(() => browser.storage.local.set({ readingDirection: 'bottom' }));
+    await settle(page);
+    const newest = await page.locator('.entry[data-id="m14"] time').evaluate((node) => Date.parse(node.dateTime));
+    await page.waitForTimeout(1500);
+    assert.ok(await page.evaluate(async () => (await browser.storage.local.get('collections')).collections[0].readAt) < newest, 'the off-screen newest message stays unread');
+  },
   async 'the direction setting orders the feed, its graph, positions and keys'(page) {
     assert.equal(await page.evaluate(async () => (await browser.storage.local.get('readingDirection')).readingDirection), undefined);
     const newestFirst = ['m14', 'm13', 'm12', 'm11', 'm10', 'm9', 'm8', 'm7'];
@@ -294,7 +317,7 @@ const sections = {
     assert.equal(await page.inputValue('#direction'), 'top', 'an unknown value means top');
     assert.deepEqual(await entryIds(page), newestFirst, 'an unknown value keeps newest first');
     await page.click('#menubtn');
-    await page.selectOption('#direction', 'bottom');
+    await page.evaluate(() => browser.storage.local.set({ readingDirection: 'bottom' }));
     await page.waitForFunction(() => document.querySelector('.entry')?.dataset.id === 'm7');
     assert.equal(await page.evaluate(async () => (await browser.storage.local.get('readingDirection')).readingDirection), 'bottom', 'choosing bottom persists');
     await page.locator('h1').click();
@@ -340,7 +363,7 @@ const sections = {
     await page.keyboard.press('n');
     assert.equal(await page.evaluate(() => document.activeElement.dataset.id), 'm13', 'top: n moves to the next unread down the screen');
     await page.click('#menubtn');
-    await page.selectOption('#direction', 'bottom');
+    await page.evaluate(() => browser.storage.local.set({ readingDirection: 'bottom' }));
     await page.waitForFunction(() => document.querySelector('.entry')?.dataset.id === 'm7');
     await page.locator('h1').click();
     assert.deepEqual(await entryIds(page), bottomOrder, 'switching back restores chronological order');

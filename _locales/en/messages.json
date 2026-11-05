@@ -42,14 +42,6 @@
       }
     }
   },
-  "gapAt": {
-    "message": "gap $TIME$",
-    "placeholders": {
-      "time": {
-        "content": "$1"
-      }
-    }
-  },
   "newCountOne": {
     "message": "$COUNT$ new",
     "placeholders": {
@@ -206,6 +198,9 @@
   },
   "noSignal": {
     "message": "No signal"
+  },
+  "unstable": {
+    "message": "Unstable"
   },
   "noResponse": {
     "message": "The Discord tab is not responding: new activity is not being saved."
@@ -431,9 +426,6 @@
   "revealSpoiler": {
     "message": "Reveal spoiler"
   },
-  "healthOk": {
-    "message": "Capture is working. Keep your Discord tab open."
-  },
   "healthNoTab": {
     "message": "No Discord tab is receiving messages. Open discord.com to continue."
   },
@@ -443,23 +435,19 @@
   "healthMultiTab": {
     "message": "Several Discord tabs are open. Keep one open and close the others."
   },
+  "healthLate": {
+    "message": "The last signal arrived $AGE$. If Discord is open, reload its tab.",
+    "placeholders": {
+      "age": {
+        "content": "$1"
+      }
+    }
+  },
   "healthNotConsented": {
     "message": "Capture is paused until you accept the welcome notice. Open Welcome to continue."
   },
   "coverageGaps": {
     "message": "Coverage gaps"
-  },
-  "gapCovered": {
-    "message": "Recovered"
-  },
-  "recover": {
-    "message": "Recover"
-  },
-  "recoveryHint": {
-    "message": "Open #channel at the gap, then scroll up until the gap mark turns green."
-  },
-  "recoveryUnavailable": {
-    "message": "Recovery links are not available yet. Update the extension and choose channels in a collection."
   },
   "welcome": {
     "message": "Welcome"

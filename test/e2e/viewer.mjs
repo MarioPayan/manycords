@@ -123,10 +123,57 @@ const sections = {
     assert.equal(await page.evaluate(() => window.fallbackNode.isConnected), true, 'the fallback is not re-created');
     assert.equal(await page.locator('.entry[data-id="broken"] img.av').count(), 0);
   },
-  async 'status gap recovery still opens from the patched sidebar'(page) {
-    await page.locator('.gap-row button').click();
-    await page.locator('#overlay').waitFor();
-    assert.equal(await page.locator('#overlay-title').textContent(), await page.evaluate(() => browser.i18n.getMessage('recover')));
+  async 'status strip expands in place and colours its dot by capture health'(page) {
+    const message = (key) => page.evaluate((key) => browser.i18n.getMessage(key), key);
+    // Computed colours, compared with the tokens resolved on a probe element.
+    const colors = () => page.evaluate(() => {
+      const probe = (token) => { const node = document.createElement('i'); node.style.color = `var(${token})`; document.body.append(node); const value = getComputedStyle(node).color; node.remove(); return value; };
+      return { dot: getComputedStyle(document.querySelector('#status-toggle .pulse')).backgroundColor, ok: probe('--ok'), warn: probe('--warn'), off: probe('--unread') };
+    });
+    const strip = page.locator('#status-toggle');
+    assert.equal((await strip.innerText()).trim(), '', 'the collapsed strip shows no text');
+    assert.equal(await strip.locator('.pulse').isVisible(), true, 'the collapsed strip shows the dot');
+    assert.equal(await page.locator('#status-panel').isVisible(), false, 'the panel starts collapsed');
+    assert.ok((await strip.getAttribute('title')).startsWith(`${await message('listening')} · `), 'the title names the state and its age');
+    assert.equal(await strip.getAttribute('aria-label'), await strip.getAttribute('title'));
+    let c = await colors();
+    assert.equal(c.dot, c.ok, 'a fresh signal is green');
+    await strip.click();
+    assert.equal(await strip.getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#status-panel .spark').isVisible(), true, 'expanding shows the 24 h bars');
+    assert.equal(await page.locator('#status-panel .health-copy').count(), 0, 'ok shows no sentence');
+    assert.ok(await page.locator('#status-panel .spark i.gap[title]').count() > 0, 'gap bars name their time range');
+    await page.evaluate(() => { window.statusNodes = [...document.querySelectorAll('#status *')]; });
+    await bump(page);
+    assert.equal(await page.locator('#status-panel').isVisible(), true, 'a revision keeps the panel open');
+    assert.equal(await page.evaluate(() => statusNodes.filter((node) => !node.isConnected).length), 0, 'a revision keeps every status node');
+    await page.evaluate(() => browser.storage.local.set({ health: { state: 'multi-tab', since: Date.now(), detail: {} } }));
+    await page.locator('#status-panel .health-copy').waitFor();
+    assert.equal(await page.locator('#status-panel .health-copy').textContent(), await message('healthMultiTab'));
+    assert.ok((await strip.getAttribute('title')).startsWith(`${await message('unstable')} · `));
+    c = await colors();
+    assert.equal(c.dot, c.warn, 'multiple tabs turn the dot yellow');
+    assert.equal(new Set(Object.values(c)).size, 3, 'ok, warn and off are distinct colours');
+    assert.equal(await page.locator('#status-toggle .pulse').evaluate((node) => node.getAnimations().length), 0, 'yellow does not pulse');
+    await page.evaluate(() => browser.storage.local.set({ health: { state: 'broken', since: Date.now(), detail: {} } }));
+    await page.waitForFunction(() => document.querySelector('#status-panel .health-copy')?.textContent === browser.i18n.getMessage('healthBroken'));
+    c = await colors();
+    assert.equal(c.dot, c.off, 'broken capture turns the dot red');
+    await page.evaluate(() => browser.storage.local.set({ health: { state: 'ok', since: Date.now(), detail: {} } }));
+    await page.waitForFunction(() => !document.querySelector('#status-panel .health-copy'));
+    // A healthy state with a late signal: yellow past two minutes, red past three.
+    for (const [seconds, level] of [[150, 'warn'], [200, 'off']]) {
+      await page.evaluate((seconds) => browser.storage.local.set({ lastSignal: Date.now() - seconds * 1000 }), seconds);
+      await bump(page);
+      assert.equal(await page.locator('#status-panel .health-copy').textContent(), await page.evaluate((seconds) => browser.i18n.getMessage('healthLate', [browser.i18n.getMessage('minutesAgo', [String(Math.round(seconds / 60))])]), seconds), `late sentence at ${seconds} s`);
+      c = await colors();
+      assert.equal(c.dot, c[level], `a signal ${seconds} s old is ${level}`);
+    }
+    await page.evaluate(() => browser.storage.local.set({ lastSignal: Date.now() }));
+    await bump(page);
+    assert.equal(await page.locator('#status-panel .health-copy').count(), 0, 'a fresh signal clears the sentence');
+    await strip.click();
+    assert.equal(await page.locator('#status-panel').isVisible(), false, 'a second click collapses the panel');
   },
   async 'caught up keeps the history as messages arrive, in both directions'(page) {
     for (const direction of ['bottom', 'top']) {

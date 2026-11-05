@@ -28,7 +28,7 @@ const hm = (date) => new Date(date).toLocaleTimeString([], { hour: '2-digit', mi
 const THREAD_TYPES = [10, 11, 12], NOT_LISTENABLE = [4, ...THREAD_TYPES], MAX_SHOWN = 400;
 const EMOJIS = ['\u{1f4e3}', '\u2b50', '\u{1f3a8}', '\u{1f6e0}', '\u{1f3ae}', '\u{1f4c1}'];
 let S = { collections: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], stats: {}, buckets: Array(24).fill(0), people: new Map() };
-const ui = { hover: null, collection: null, src: '', conv: '', q: '', edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
+const ui = { statusOpen: false, hover: null, collection: null, src: '', conv: '', q: '', edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
 const collection = () => S.collections.find((c) => c.id === ui.collection);
 const isThread = (id) => THREAD_TYPES.includes(S.chans[id]?.type);
 const baseChannel = (m) => isThread(m.channel_id) ? S.chans[m.channel_id]?.parent_id : m.channel_id;
@@ -106,34 +106,42 @@ async function load(force = false) {
   return true;
 }
 const saveCollections = () => store.set({ collections: S.collections.filter((c) => !(ui.edit?.isNew && c.id === ui.collection)) });
-function gapTargets(gap) { return typeof recoveryTargets === 'function' ? recoveryTargets(gap, S.collections, S.chans) : []; }
 function gapCovered(gap) {
   const ids = Object.values(S.chans).filter((ch) => !NOT_LISTENABLE.includes(ch.type) && S.collections.some((c) => c.all || c.ids.includes(ch.id))).map((ch) => ch.id);
   return typeof isGapCovered === 'function' ? isGapCovered(gap, ids) : ids.length > 0 && ids.every((id) => gap.covered?.[id]);
 }
+// lastSignal advances on every leader gateway frame (heartbeat ACKs included), throttled to one per minute by hook.js,
+// so a quiet but healthy channel refreshes it every 60-100 s. Thresholds sit above that cadence.
+const SIGNAL_WARN = 120, SIGNAL_OFF = 180;
+function chevron() {
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+  for (const [key, value] of Object.entries({ class: 'ic', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(key, value);
+  path.setAttribute('d', 'm6 15 6-6 6 6'); svg.append(path); return svg;
+}
 function renderStatus() {
   const age = S.lastSignal ? (Date.now() - S.lastSignal) / 1000 : Infinity;
-  const state = S.health?.state ?? (!S.consentedAt ? 'not-consented' : age <= 180 ? 'ok' : 'no-tab');
-  const keys = { ok: 'healthOk', 'no-tab': 'healthNoTab', broken: 'healthBroken', 'multi-tab': 'healthMultiTab', 'not-consented': 'healthNotConsented' };
-  const status = $('#status'); status.className = `status ${state === 'ok' ? '' : 'off'}`;
+  const state = S.health?.state ?? (!S.consentedAt ? 'not-consented' : age <= SIGNAL_OFF ? 'ok' : 'no-tab');
+  const keys = { 'no-tab': 'healthNoTab', broken: 'healthBroken', 'multi-tab': 'healthMultiTab', 'not-consented': 'healthNotConsented' };
+  // Age applies only once a signal exists: before the first frame, health alone decides.
+  const late = S.lastSignal ? age > SIGNAL_OFF ? 'off' : age > SIGNAL_WARN ? 'warn' : '' : '';
+  const level = !['ok', 'multi-tab'].includes(state) || late === 'off' ? 'off' : state === 'multi-tab' || late ? 'warn' : 'ok';
+  const word = level === 'ok' ? t('listening') : t(level === 'warn' ? 'unstable' : 'noSignal');
   const ageLabel = !S.lastSignal ? t('never') : age < 60 ? t('secondsAgo', [Math.max(1, Math.round(age))]) : age < 3600 ? t('minutesAgo', [Math.round(age / 60)]) : fmtFull(S.lastSignal);
-  const parts = [el('div', { class: 'row' }, el('span', { class: 'pulse' }), el('b', {}, t(state === 'ok' ? 'listening' : 'noSignal')), el('small', {}, ageLabel)), el('p', { class: 'health-copy' }, t(keys[state] ?? 'healthBroken'))];
-  if (state === 'not-consented') parts.push(button(t('welcome'), { class: 'textbtn', onclick: () => showWelcome() }));
-  if (state === 'no-tab') parts.push(link(t('openDiscordStep'), 'https://discord.com/app'));
+  const status = $('#status'); status.className = `status ${level}`;
+  const panel = [el('div', { class: 'row' }, el('span', { class: 'pulse' }), el('b', {}, word), el('small', {}, ageLabel))];
+  if (level !== 'ok') panel.push(el('p', { class: 'health-copy' }, state === 'ok' ? t('healthLate', [ageLabel]) : t(keys[state] ?? 'healthBroken')));
+  if (state === 'not-consented') panel.push(button(t('welcome'), { class: 'textbtn', onclick: () => showWelcome() }));
+  if (state === 'no-tab') panel.push(link(t('openDiscordStep'), 'https://discord.com/app'));
   const gaps = S.events.filter((e) => e.type === 'gap' && (e.to ?? e.at) > Date.now() - 864e5);
   const max = Math.max(1, ...S.buckets);
-  parts.push(el('div', { class: 'spark', title: t('hourlyCapture') }, S.buckets.map((n, i) => {
+  panel.push(el('div', { class: 'spark', title: t('hourlyCapture') }, S.buckets.map((n, i) => {
     const gap = gaps.find((g) => g.from < Date.now() - (23 - i) * 36e5 && g.to > Date.now() - (24 - i) * 36e5);
-    return el('i', { class: gap ? gapCovered(gap) ? 'covered' : 'gap' : n ? '' : 'none', style: { height: `${10 + n / max * 90}%` } });
+    return el('i', { class: gap ? gapCovered(gap) ? 'covered' : 'gap' : n ? '' : 'none', title: gap && t('gapRange', [fmtFull(gap.from), fmtFull(gap.to)]), style: { height: `${10 + n / max * 90}%` } });
   })), el('div', { class: 'legend' }, t('dayAgo'), el('span', {}, t(gaps.length ? 'coverageGaps' : 'noGaps')), t('now')));
-  for (const gap of gaps) {
-    const covered = gapCovered(gap);
-    const row = el('div', { class: `gap-row ${covered ? 'covered' : ''}` }, el('span', { title: t('gapRange', [fmtFull(gap.from), fmtFull(gap.to)]) }, t('gapAt', [hm(gap.from)])));
-    if (covered) row.append(el('span', {}, t('gapCovered')));
-    else row.append(button(t('recover'), { class: 'textbtn', 'data-gap': gap.from }));
-    parts.push(row);
-  }
-  patch(status, parts);
+  const label = `${word} \u00b7 ${ageLabel}`;
+  // The strip comes first (tab order: disclosure, then its panel); CSS stacks the panel above it.
+  patch(status, [button([el('span', { class: 'pulse' }), chevron()], { class: 'strip', id: 'status-toggle', 'aria-expanded': String(ui.statusOpen), 'aria-controls': 'status-panel', title: label, 'aria-label': label }),
+    el('div', { class: 'status-panel', id: 'status-panel', hidden: ui.statusOpen ? null : '' }, panel)]);
   if ($('#guide-signal')) { $('#guide-signal').textContent = t(state === 'ok' ? 'greenSignal' : 'waitSignal'); $('#guide-signal').classList.toggle('covered', state === 'ok'); }
 }
 function renderSide() {
@@ -504,10 +512,6 @@ function showWelcome() {
 function showGuide() {
   overlay(t('guidedSteps'), el('ol', {}, el('li', {}, link(t('openDiscordStep'), 'https://discord.com/app')), el('li', { id: 'guide-signal' }, t(S.health?.state === 'ok' ? 'greenSignal' : 'waitSignal')), el('li', {}, button(t('createFirstCollection'), { class: 'textbtn', id: 'create-first', onclick: () => { closeOverlay(); newCollection(); } }))), button(t('done'), { class: 'btn', onclick: closeOverlay }));
 }
-function showRecovery(gap) {
-  const targets = gapTargets(gap);
-  overlay(t('recover'), el('p', {}, t('recoveryHint')), targets.length ? el('ul', {}, targets.map((target) => el('li', {}, link(`#${chanName(target.channelId)}`, target.url)))) : el('p', {}, t('recoveryUnavailable')), button(t('close'), { class: 'btn', onclick: closeOverlay }));
-}
 function showShortcuts() {
   const shortcuts = [['j / k', 'shortcutMove'], ['n', 'shortcutUnread'], ['m', 'markRead'], ['/', 'search'], ['e', 'editCollection'], ['Esc', 'close'], ['?', 'shortcuts']];
   overlay(t('shortcuts'), el('dl', {}, shortcuts.map(([key, name]) => [el('dt', {}, key), el('dd', {}, t(name))])), button(t('close'), { class: 'btn', onclick: closeOverlay }));
@@ -538,7 +542,7 @@ async function click(event) {
   else if (b.dataset.src) { ui.src = ui.src === b.dataset.src ? '' : b.dataset.src; ui.conv = ''; render(); }
   else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; ui.hover = null; renderRiver(); }
   else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
-  else if (b.dataset.gap) showRecovery(S.events.find((event) => event.type === 'gap' && String(event.from) === b.dataset.gap));
+  else if (b.id === 'status-toggle') { ui.statusOpen = !ui.statusOpen; renderStatus(); }
   else if (b.id === 'markread') await markRead();
   else if (b.id === 'themebtn') await store.set({ theme: isDark() ? 'light' : 'dark' });
   else if (b.id === 'edit' || b.id === 'emptyedit') openEdit(false);

@@ -108,6 +108,7 @@ test('WCAG contrast for actual body text, badges, large text and UI glyph tokens
     assert.ok(contrast(tokens.bg, tokens.ink) >= 4.5, 'primary button, avatar fallback, selected pill');
     assert.ok(contrast(tokens.ink, tokens.bg) >= 3, 'large heading');
     assert.ok(contrast(tokens.faint, tokens.bg) >= 3, 'UI glyphs');
+    for (const bg of ['side', 'surface', 'sunk']) assert.ok(contrast(tokens.warn, tokens[bg]) >= 3, `${block[0].slice(0, 35)} warn status dot on ${bg}`);
     // Lane labels use an 11% tinted background, hover increases it to 18%.
     for (const lane of ['l0', 'l1', 'l2', 'l3', 'l4', 'l5']) {
       const mix = (alpha) => '#' + [0, 2, 4].map((i) => Math.round(parseInt(tokens[lane].slice(i + 1, i + 3), 16) * alpha + parseInt(tokens.bg.slice(i + 1, i + 3), 16) * (1 - alpha)).toString(16).padStart(2, '0')).join('');

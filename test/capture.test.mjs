@@ -7,7 +7,7 @@ import { fakeIndexedDB } from './fake-idb.mjs';
 import { i18n } from './i18n.mjs';
 
 const read = (name) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
-const { mergeHistoryRuns, coverGap, isGapCovered, recoveryTargets } = createRequire(import.meta.url)('../gaps.js');
+const { mergeHistoryRuns, coverGap, isGapCovered } = createRequire(import.meta.url)('../gaps.js');
 const BASE = Date.parse('2026-10-27T12:00:00Z');
 const M = 60e3, DAY = 864e5;
 const message = (id, at = BASE, channel_id = 'c') => ({ id, channel_id,
@@ -275,17 +275,6 @@ test('gap coverage requires one response or overlapping message-ID runs spanning
   assert.equal(gap.covered, undefined, 'helpers do not mutate gap input');
   assert.equal(coverGap(gap, mergeHistoryRuns([], [message('left', gap.from), message('right', gap.to)])).covered.c, true);
   assert.equal(coverGap(gap, mergeHistoryRuns([], [message('left', gap.from), message('right', gap.to, 'other')])).covered.c, undefined);
-});
-
-test('recovery targets match selectable server channels, union collections, uncovered IDs and exact synthetic URL', () => {
-  const gap = { from: BASE - M, to: BASE, covered: { covered: true } };
-  const channels = { c: { id: 'c', guild_id: 'g', type: 0 }, covered: { id: 'covered', guild_id: 'g', type: 5 },
-    category: { id: 'category', guild_id: 'g', type: 4 }, thread: { id: 'thread', guild_id: 'g', parent_id: 'c', type: 11 },
-    other: { id: 'other', guild_id: 'g2', type: 0 }, dm: { id: 'dm', type: 1 } };
-  const expected = { channelId: 'c', guildId: 'g', url: `https://discord.com/channels/g/c/${(BigInt(BASE) - 1420070400000n) << 22n}` };
-  assert.deepEqual(recoveryTargets(gap, [{ ids: ['c', 'covered', 'category', 'thread'] }], channels), [expected]);
-  assert.equal(recoveryTargets(gap, [{ all: true }, { ids: ['c'] }], channels).length, 2);
-  assert.deepEqual(recoveryTargets(gap, [], channels), []);
 });
 
 test('background script dependencies are ordered and alarm permission ships for both browsers', () => {

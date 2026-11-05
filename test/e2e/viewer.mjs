@@ -214,7 +214,8 @@ const sections = {
       await arrive(page, `b1-${direction}`, { content: long });
       await page.locator(`.entry[data-id="b1-${direction}"]`).waitFor();
       await page.waitForTimeout(30);
-      assert.ok(await edgeGap(page, direction) > 2, `${direction}: the burst really lands during the smooth scroll`);
+      // The arrival unfolds from zero height, so the river keeps growing while the view follows it.
+      assert.ok(await page.locator(`.entry[data-id="b1-${direction}"]`).evaluate((node) => node.getAnimations().some((a) => a.playState === 'running' && a.effect.getKeyframes().some((k) => k.height === '0px'))), `${direction}: the burst lands while its height is still opening`);
       await arrive(page, `b2-${direction}`, { content: long });
       await page.locator(`.entry[data-id="b2-${direction}"]`).waitFor();
       await atEdge(page, direction, `${direction}: a burst still ends at the edge`);
@@ -327,7 +328,7 @@ const sections = {
     await page.locator('.entry[data-id="fresh"]').waitFor();
     assert.deepEqual(await page.evaluate(() => animated), ['fresh'], 'the arrival is the only animated message');
     assert.equal(await page.evaluate(() => popped.length), 1, 'its graph dot pops once');
-    assert.match(await page.locator('.entry[data-id="fresh"]').evaluate((node) => getComputedStyle(node).animationName), /entry-rise/);
+    assert.match(await page.locator('.entry[data-id="fresh"]').evaluate((node) => getComputedStyle(node).animationName), /entry-fade/);
     await page.waitForFunction(() => !document.querySelector('.arrive, .pop'));
     await arrive(page, 'next');
     await page.locator('.entry[data-id="next"]').waitFor();

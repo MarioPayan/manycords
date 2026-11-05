@@ -249,7 +249,7 @@ function mountRiver() {
   svg.append(lines, dots); river.append(svg);
   graph = { svg, lines, dots, dotById: new Map() };
   new ResizeObserver(() => { if (river.isConnected) { draw(); syncFollow(); } }).observe(river);
-  $('#scroll').addEventListener('animationend', (event) => { if (['entry-tint', 'dot-pop'].includes(event.animationName)) event.target.classList.remove('arrive', 'pop'); });
+  $('#scroll').addEventListener('animationend', (event) => { if (['entry-tint', 'dot-pop'].includes(event.animationName)) { event.target.classList.remove('arrive', 'pop'); event.target.style.removeProperty('--d'); } });
 }
 function showEmpty(node) {
   const scroll = $('#scroll');
@@ -291,7 +291,7 @@ function draw() {
   for (const [id, dot] of dotById) if (!wanted.has(id)) { dot.remove(); dotById.delete(id); }
   for (const [id, attrs] of wanted) {
     if (dotById.has(id)) { shape('circle', attrs, dotById.get(id)); continue; }
-    const dot = shape('circle', attrs); if (arrivals.has(id)) dot.classList.add('pop');
+    const dot = shape('circle', attrs); if (arrivals.has(id)) { dot.classList.add('pop'); dot.style.setProperty('--d', `${arrivals.get(id)}s`); }
     dotById.set(id, dot); dots.append(dot);
   }
   applyHover();
@@ -373,7 +373,7 @@ function renderRiver() {
   const endcap = keyed('endcap', S.direction, () => el('div', { class: 'endcap' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '\u2713'), t(top ? 'feedEndTop' : 'feedEnd')));
   const byId = new Map(S.msgs.map((m) => [m.id, m]));
   const today = new Date().toDateString(), yesterday = new Date(Date.now() - 864e5).toDateString();
-  const feed = [], labels = new Map(), entries = new Map(), arrivals = new Set();
+  const feed = [], labels = new Map(), entries = new Map(), arrivals = new Map();
   let day, newest = -Infinity;
   list.forEach((m, index) => {
     const date = new Date(m.timestamp).toDateString(), time = Date.parse(m.timestamp);
@@ -389,7 +389,7 @@ function renderRiver() {
     entry.classList.toggle('unread', isUnread(c, m)); entry.dataset.c = m.channel_id;
     entry.setAttribute('aria-posinset', index + 1); entry.setAttribute('aria-setsize', list.length);
     // Only messages newer than anything already on screen animate: never opening, filtering or expanding.
-    if (fresh && !changed && time > ui.newestShown) { entry.classList.add('arrive'); arrivals.add(m.id); }
+    if (fresh && !changed && time > ui.newestShown) arrivals.set(m.id, 0);
     entries.set(m.id, entry); feed.push(entry); newest = Math.max(newest, time);
   });
   // The graph stays last and is never moved. Reconcile in place: stale nodes first, so survivors keep their positions.
@@ -399,6 +399,17 @@ function renderRiver() {
   let cursor = river.firstChild;
   for (const node of nodes) { if (node === cursor) cursor = cursor.nextSibling; else river.insertBefore(node, cursor); }
   if (river.parentNode !== scroll) scroll.replaceChildren(river);
+  // A batch unfolds oldest first, 70 ms apart; the river's ResizeObserver redraws the lanes and follows while heights open.
+  [...arrivals.keys()].sort((a, b) => Date.parse(byId.get(a).timestamp) - Date.parse(byId.get(b).timestamp)).forEach((id, i) => {
+    const entry = entries.get(id), delay = i * 0.07;
+    arrivals.set(id, delay);
+    entry.style.setProperty('--d', `${delay}s`); entry.style.setProperty('--c', laneColor(byId.get(id).channel_id)); entry.classList.add('arrive');
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const { paddingTop, paddingBottom } = getComputedStyle(entry), height = `${entry.getBoundingClientRect().height}px`;
+    entry.style.overflow = 'hidden';
+    entry.animate([{ height: '0px', paddingTop: '0px', paddingBottom: '0px' }, { height, paddingTop, paddingBottom }], { duration: 300, delay: delay * 1000, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'backwards' })
+      .finished.then(() => { entry.style.overflow = ''; }, () => { entry.style.overflow = ''; });
+  });
   Object.assign(graph, { list, laneIds, convs, convOf, replies, labels, entries, gut, x, arrivals });
   draw(); document.fonts?.ready.then(() => { if (river.isConnected) draw(); });
   if (changed) {

@@ -38,6 +38,13 @@ function readingOrder(messages, readAt, expanded = false) {
   const unread = sorted.filter((m) => Date.parse(m.timestamp) > readAt);
   return { earlier, unread, visible: unread.length ? [...(expanded ? earlier : []), ...unread] : earlier.slice(-50) };
 }
+// Where the visible block starts when a feed opens: unread keeps readAt; otherwise the latest messages stay
+// on show so a first arrival cannot collapse them. Timestamp peers are never split.
+function displayBoundary(messages, readAt, keep = 50) {
+  const times = messages.map((m) => Date.parse(m.timestamp)).filter(Number.isFinite).sort((a, b) => a - b);
+  if (times.at(-1) > readAt) return readAt;
+  return times.length > keep ? times[times.length - keep] - 1 : -Infinity;
+}
 function safeLink(value) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? url.href : null; } catch { return null; }
 }
@@ -68,4 +75,4 @@ function markdownTokens(value, depth = 0) {
   if (end < text.length) tokens.push({ type: 'text', text: text.slice(end) });
   return tokens;
 }
-if (typeof module !== 'undefined') module.exports = { assignConversations, laneIndex, readHighWater, readingOrder, markdownTokens, safeLink };
+if (typeof module !== 'undefined') module.exports = { assignConversations, laneIndex, readHighWater, readingOrder, displayBoundary, markdownTokens, safeLink };

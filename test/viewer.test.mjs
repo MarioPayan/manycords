@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 const context = { module: { exports: {} }, URL };
 vm.runInNewContext(readFileSync('threads.js', 'utf8'), context);
-const { laneIndex, assignConversations, readHighWater, readingOrder, markdownTokens, safeLink } = context.module.exports;
+const { laneIndex, assignConversations, readHighWater, readingOrder, displayBoundary, markdownTokens, safeLink } = context.module.exports;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const message = (id, time, channel_id = 'a', extra = {}) => ({ id, channel_id, timestamp: new Date(time).toISOString(), ...extra });
 
@@ -39,6 +39,31 @@ test('unread starts at the top, earlier read expands chronologically, all-read e
   assert.equal(readingOrder(rows, 70, true).visible.length, 80);
   assert.deepEqual(plain(readingOrder(rows, 100).visible.map((m) => m.id)), rows.slice(-50).map((m) => m.id));
   assert.deepEqual(plain(readingOrder([...rows, message('arrival', 90)], 70).unread.map((m) => m.id)), [...rows.slice(70).map((m) => m.id), 'arrival']);
+});
+
+test('display boundary keeps readAt with unread, otherwise holds the latest fifty on screen', () => {
+  const rows = Array.from({ length: 80 }, (_, i) => message(String(i), i + 1));
+  assert.equal(displayBoundary(rows, 70), 70, 'unread keeps readAt');
+  assert.equal(displayBoundary(rows.toReversed(), 79), 79, 'order does not matter');
+  assert.equal(displayBoundary(rows, 80), 30, 'just before the 50th newest');
+  assert.equal(displayBoundary(rows, 1000), 30, 'readAt past every message');
+  const caughtUp = readingOrder(rows, displayBoundary(rows, 80));
+  assert.deepEqual(plain(caughtUp.visible.map((m) => m.id)), rows.slice(-50).map((m) => m.id));
+  assert.equal(caughtUp.earlier.length, 30);
+  const arrived = readingOrder([...rows, message('arrival', 90)], displayBoundary(rows, 80));
+  assert.deepEqual(plain(arrived.visible.map((m) => m.id)), [...rows.slice(-50).map((m) => m.id), 'arrival'], 'the first arrival keeps the history');
+  const peers = [...rows, message('peer', 31)];
+  assert.equal(displayBoundary(peers, 80), 30, 'the 50th and 51st newest are timestamp peers');
+  const peerOrder = readingOrder(peers, displayBoundary(peers, 80));
+  assert.equal(peerOrder.visible.length, 51, 'peers are not split, even past fifty');
+  assert.deepEqual(plain(peerOrder.visible.slice(0, 2).map((m) => m.id)).sort(), ['30', 'peer']);
+  const few = rows.slice(0, 50);
+  assert.equal(readingOrder(few, displayBoundary(few, 80)).visible.length, 50, 'fifty or fewer: all shown');
+  assert.equal(readingOrder(few, displayBoundary(few, 80)).earlier.length, 0, 'fifty or fewer: nothing hidden');
+  assert.ok(displayBoundary(few, 80) < 0, 'lower than everything');
+  assert.ok(displayBoundary([], 80) < 0, 'empty feed: lower than everything');
+  assert.equal(displayBoundary(rows, 80, 10), 70, 'keep count is a parameter');
+  assert.equal(displayBoundary([...rows, { id: 'bad', timestamp: 'not a date' }], 80), 30, 'invalid timestamps are ignored');
 });
 
 test('markdown produces safe DOM-free tokens for Discord formatting', () => {

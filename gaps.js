@@ -42,16 +42,4 @@ function isGapCovered(gap, channelIds) {
   return channelIds.every((id) => gap.covered?.[id] === true);
 }
 
-function recoveryTargets(gap, collections, channels) {
-  // Jumping to a synthetic snowflake is unverified against Discord; test live.
-  const snowflake = ((BigInt(Math.trunc(gap.to)) - 1420070400000n) << 22n).toString();
-  // Match the reader: categories and threads are not independently selectable.
-  const excluded = new Set([4, 10, 11, 12]);
-  return Object.values(channels).filter((channel) => channel.guild_id && !excluded.has(channel.type)
-    && !gap.covered?.[channel.id] && collections.some((collection) => collection.all
-      || collection.ids?.includes(channel.id) || collection.ids?.includes(channel.parent_id)))
-    .map((channel) => ({ channelId: channel.id, guildId: channel.guild_id,
-      url: `https://discord.com/channels/${channel.guild_id}/${channel.id}/${snowflake}` }));
-}
-
-if (typeof module !== 'undefined') module.exports = { mergeHistoryRuns, coverGap, isGapCovered, recoveryTargets };
+if (typeof module !== 'undefined') module.exports = { mergeHistoryRuns, coverGap, isGapCovered };

@@ -186,7 +186,9 @@ test('hook recognizes only message history arrays, picks thumbnails, and keeps a
   assert.equal(page.sent.filter((item) => item.kind === 'alive').length, 1);
   page.frame(null, null, 11);
   assert.equal(page.sent.filter((item) => item.kind === 'alive').length, 1);
-  page.advance(M); page.frame(null, null, 11);
+  page.advance(15e3 - 1); page.frame(null, null, 11);
+  assert.equal(page.sent.filter((item) => item.kind === 'alive').length, 1, 'alive stays throttled for 15 s');
+  page.advance(1); page.frame(null, null, 11);
   assert.equal(page.sent.filter((item) => item.kind === 'alive').length, 2);
 });
 

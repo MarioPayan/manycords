@@ -73,10 +73,11 @@
         break;
     }
   };
-  // Liveness comes only from gateway frames, including heartbeat acknowledgements.
+  // Liveness comes only from gateway frames, including heartbeat acknowledgements (about every 41 s on a quiet channel).
+  // ponytail: 15 s throttle; each alive bumps the viewer's rev, so lower it only if that reload is cheap.
   const pulse = () => {
     const now = Date.now();
-    if (now - lastAlive >= 60e3) {
+    if (now - lastAlive >= 15e3) {
       lastAlive = now;
       send('alive', null);
     }

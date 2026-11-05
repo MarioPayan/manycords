@@ -67,7 +67,9 @@ npm run lint
 
 ## Publishing to the stores
 
-Bump `version` in `manifest.json` and `package.json`, run `npm run build`, then publish a GitHub release tagged `v<version>` with both zips from `dist/` attached. `.github/workflows/publish-stores.yml` then sends those zips to the Chrome Web Store and Firefox Add-ons for review. It stops if the zip's version does not match the tag, and each store runs as its own job, so one failing does not block the other. Each store rejects a version it already has, so a re-run only succeeds for the store that failed.
+Bump `version` in `manifest.json` and `package.json`, run `npm run build`, publish a GitHub release tagged `v<version>` with both zips from `dist/` attached, then upload each zip by hand in the Chrome Web Store and Firefox Add-ons dashboards and submit it for review.
+
+The automatic route below is disabled because uploads are manual; turn it on with `gh workflow enable publish-stores.yml` after setting its secrets. When enabled, `.github/workflows/publish-stores.yml` sends a published release's zips to both stores for review. It stops if the zip's version does not match the tag, and each store runs as its own job, so one failing does not block the other. Each store rejects a version it already has, so a re-run only succeeds for the store that failed.
 
 - A release marked as a pre-release stays off the stores.
 - To send an existing release, run the workflow by hand: `gh workflow run publish-stores.yml -f tag=v0.2.0`. This starts a real submission.

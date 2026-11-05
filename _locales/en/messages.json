@@ -327,6 +327,18 @@
   "deleted": {
     "message": "deleted in Discord"
   },
+  "feedEndTop": {
+    "message": "You’re up to date. New messages will appear here."
+  },
+  "newArrive": {
+    "message": "New messages arrive"
+  },
+  "directionBottom": {
+    "message": "At the bottom (chat)"
+  },
+  "directionTop": {
+    "message": "At the top (RSS)"
+  },
   "feedEnd": {
     "message": "You’re up to date. New messages will appear below."
   },

@@ -327,6 +327,18 @@
   "deleted": {
     "message": "borrado en Discord"
   },
+  "feedEndTop": {
+    "message": "Estás al día. Lo nuevo aparecerá aquí."
+  },
+  "newArrive": {
+    "message": "Lo nuevo llega"
+  },
+  "directionBottom": {
+    "message": "Abajo (chat)"
+  },
+  "directionTop": {
+    "message": "Arriba (RSS)"
+  },
   "feedEnd": {
     "message": "Estás al día. Lo nuevo aparecerá aquí abajo."
   },

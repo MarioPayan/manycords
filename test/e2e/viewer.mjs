@@ -20,6 +20,373 @@ const server = createServer(async (request, response) => {
   } catch { response.writeHead(404).end(); }
 });
 await new Promise((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done); });
+// Reading flow: every section gets a fresh fixture. All run even if one fails, so a regression names each broken behaviour.
+const settle = (page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done)))));
+const arrive = (page, id, extra = {}) => page.evaluate(async ([id, extra]) => {
+  window.arrivalClock = (window.arrivalClock ?? Date.now() + 1000) + 1000;
+  await feedDB.writeMessage({ id, channel_id: 'gen', guild_id: 'g1', timestamp: new Date(window.arrivalClock).toISOString(), author: { id: '1', name: 'Nico' }, content: `Arrival ${id}`, ...extra });
+  const { rev } = await browser.storage.local.get('rev');
+  await browser.storage.local.set({ rev: rev + 1 });
+}, [id, extra]);
+const bump = (page) => page.evaluate(async () => {
+  const count = viewerQueries.length, { rev } = await browser.storage.local.get('rev');
+  await browser.storage.local.set({ rev: rev + 1 });
+  while (viewerQueries.length === count) await new Promise((done) => setTimeout(done, 10));
+  await new Promise((done) => setTimeout(done, 100));
+});
+const entryIds = (page) => page.$$eval('.entry', (nodes) => nodes.map((node) => node.dataset.id));
+const edgeGap = (page, direction) => page.locator('#scroll').evaluate((s, direction) => direction === 'top' ? s.scrollTop : s.scrollHeight - s.clientHeight - s.scrollTop, direction);
+const atEdge = (page, direction, message) => page.waitForFunction((direction) => { const s = document.querySelector('#scroll'); return (direction === 'top' ? s.scrollTop : s.scrollHeight - s.clientHeight - s.scrollTop) <= 2; }, direction).catch(() => assert.fail(message));
+// Like a reader: reach the newest edge, then move away from it by `distance`.
+const scrollTo = async (page, direction, distance) => {
+  for (const offset of distance ? [0, distance] : [0]) {
+    await page.locator('#scroll').evaluate((s, [direction, offset]) => { s.scrollTop = direction === 'top' ? offset : s.scrollHeight - s.clientHeight - offset; }, [direction, offset]);
+    await settle(page);
+  }
+};
+// A visible entry as a position reference.
+const reference = (page) => page.evaluate(() => {
+  const bounds = document.querySelector('#scroll').getBoundingClientRect();
+  const node = [...document.querySelectorAll('.entry')].find((entry) => entry.getBoundingClientRect().top >= bounds.top + 40);
+  return { id: node.dataset.id, top: node.getBoundingClientRect().top, scrollTop: document.querySelector('#scroll').scrollTop };
+});
+const topOf = (page, id) => page.locator(`.entry[data-id="${id}"]`).evaluate((node) => node.getBoundingClientRect().top);
+const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) <= 1, `${message}: ${actual} vs ${expected}`);
+const setDirection = async (page, direction) => { await page.evaluate((direction) => browser.storage.local.set({ readingDirection: direction }), direction); await page.waitForFunction((direction) => document.querySelector('#direction').value === direction, direction); await settle(page); };
+// An attachment with no recorded size, whose image arrives late and grows the feed. Later than the one second a
+// visible message needs to count as seen, so no read-state render can hide a missing reaction to the growth.
+const lateImage = async (page, name) => {
+  await page.route(`https://cdn.discordapp.com/attachments/**/${name}*`, async (route) => { await new Promise((done) => setTimeout(done, 2000)); await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200"/>' }); });
+  return { content: name, attachments: [{ filename: name, content_type: 'image/png', url: `https://cdn.discordapp.com/attachments/1/2/${name}` }] };
+};
+const caughtUp = async (page) => { await page.click('#markread'); await page.waitForFunction(() => document.querySelectorAll('.entry').length >= 50); await settle(page); };
+const sections = {
+  async 'hover changes nothing but the hovered message'(page) {
+    const opacities = () => page.$$eval('.entry, .conv, .graph path, .graph circle', (nodes) => nodes.map((node) => getComputedStyle(node).opacity));
+    const before = await opacities();
+    await page.locator('.entry[data-id="m13"]').hover();
+    await page.waitForTimeout(300);
+    assert.deepEqual(await opacities(), before, 'hovering leaves every computed opacity unchanged');
+    assert.equal(await page.locator('.entry[data-id="m13"] .tools').isVisible(), true, 'the hovered message still shows its tools');
+    await page.locator('.entry[data-id="m13"] [data-focus]').click();
+    assert.deepEqual(await entryIds(page), ['m13'], 'the focus button still filters to the channel');
+    await page.locator('[data-clear="conv"]').click();
+    assert.equal(await page.locator('.entry').count(), 8);
+  },
+  async 'revisions and read state keep every node, scroll, focus and typed text'(page) {
+    await page.setViewportSize({ width: 1360, height: 500 });
+    await arrive(page, 'pic', { content: '||hidden||', attachments: [{ filename: 'a.png', content_type: 'image/png', url: 'https://cdn.discordapp.com/attachments/1/2/a.png', width: 1000, height: 500 }] });
+    await page.locator('.entry[data-id="pic"]').waitFor();
+    const size = await page.locator('.thumbnail').evaluate((node) => [node.offsetWidth, node.offsetHeight]);
+    assert.deepEqual(size, [320, 160], 'the thumbnail box is reserved from the capture dimensions');
+    await page.locator('.spoiler').click();
+    // A space matches every message, so the whole feed stays on screen with text typed in the search box.
+    await page.locator('#q').pressSequentially(' ');
+    await settle(page);
+    await page.locator('#scroll').evaluate((s) => { s.scrollTop = 60; });
+    await settle(page);
+    await page.evaluate(() => {
+      window.tracked = [...document.querySelectorAll('.entry, .entry img, #side img, .pulse, .conv, .day, #q, #scroll .river')];
+      window.removed = 0;
+      new MutationObserver((records) => { for (const record of records) if (!record.target.closest?.('.graph')) window.removed += record.removedNodes.length; }).observe(document.querySelector('#scroll'), { childList: true, subtree: true });
+      window.pulseStart = document.querySelector('.pulse').getAnimations()[0].startTime;
+    });
+    const before = await page.evaluate(() => ({ count: tracked.length, unread: document.querySelectorAll('.entry.unread').length, top: document.querySelector('#scroll').scrollTop }));
+    assert.ok(before.count > 12 && before.unread > 0, 'the tracked set is meaningful');
+    const check = async (step) => {
+      const after = await page.evaluate(() => ({ gone: tracked.filter((node) => !node.isConnected).length, removed: window.removed, top: document.querySelector('#scroll').scrollTop, pulse: document.querySelector('.pulse').getAnimations()[0].startTime === window.pulseStart, focus: document.activeElement.id, value: document.querySelector('#q').value, selection: document.querySelector('#q').selectionStart, spoiler: document.querySelector('.spoiler').classList.contains('revealed') }));
+      assert.deepEqual(after, { gone: 0, removed: 0, top: before.top, pulse: true, focus: 'q', value: ' ', selection: 1, spoiler: true }, step);
+    };
+    await bump(page);
+    await check('after an unrelated revision');
+    await page.evaluate(async () => { const { collections } = await browser.storage.local.get('collections'); collections[0].readAt = Date.now() + 864e5; await browser.storage.local.set({ collections }); });
+    await page.waitForFunction(() => document.querySelectorAll('.entry.unread').length === 0);
+    await settle(page);
+    await check('after a read advance');
+    assert.equal(await page.locator('.newpill').count(), 0, 'the head counter follows the read state');
+    assert.equal(await page.locator('.item.on .n').textContent(), '', 'the sidebar counter follows the read state');
+    await page.locator('[data-clear="q"]').click();
+    assert.equal(await page.inputValue('#q'), '', 'clearing the chip clears the input');
+  },
+  async 'a broken image stays on its fallback across renders'(page) {
+    await page.route('https://cdn.discordapp.com/avatars/**', (route) => route.fulfill({ status: 404, body: '' }));
+    await arrive(page, 'broken', { author: { id: '42', name: 'Broken Face', avatar: 'nope' } });
+    await page.waitForFunction(() => document.querySelector('.entry[data-id="broken"] span.av'));
+    const initial = await page.locator('.entry[data-id="broken"] span.av').evaluate((node) => { window.fallbackNode = node; return node.textContent; });
+    assert.equal(initial, 'BF');
+    await bump(page);
+    assert.equal(await page.evaluate(() => window.fallbackNode.isConnected), true, 'the fallback is not re-created');
+    assert.equal(await page.locator('.entry[data-id="broken"] img.av').count(), 0);
+  },
+  async 'status gap recovery still opens from the patched sidebar'(page) {
+    await page.locator('.gap-row button').click();
+    await page.locator('#overlay').waitFor();
+    assert.equal(await page.locator('#overlay-title').textContent(), await page.evaluate(() => browser.i18n.getMessage('recover')));
+  },
+  async 'caught up keeps the history as messages arrive, in both directions'(page) {
+    for (const direction of ['bottom', 'top']) {
+      await setDirection(page, direction);
+      await caughtUp(page);
+      const before = await entryIds(page);
+      await arrive(page, `up-${direction}`);
+      await page.locator(`.entry[data-id="up-${direction}"]`).waitFor();
+      await settle(page);
+      const after = await entryIds(page);
+      assert.equal(after.length, before.length + 1, `${direction}: the arrival adds to the history`);
+      assert.ok(before.every((id) => after.includes(id)), `${direction}: nothing leaves the feed`);
+      assert.equal(await page.locator('.earlier').count(), 1, `${direction}: older messages stay reachable`);
+    }
+    // Opening a feed with nothing unread behaves the same way.
+    await caughtUp(page);
+    await page.click('[data-collection="club"]');
+    await page.waitForFunction(() => document.querySelector('h1').textContent === 'Game Club');
+    await page.click('[data-collection="all"]');
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length >= 50);
+    const shown = await page.locator('.entry').count();
+    await arrive(page, 'up-open');
+    await page.locator('.entry[data-id="up-open"]').waitFor();
+    await settle(page);
+    assert.equal(await page.locator('.entry').count(), shown + 1, 'a feed opened caught up keeps its history');
+  },
+  async 'following keeps the newest edge in view, including a burst during a smooth scroll'(page) {
+    const long = 'long line\n'.repeat(30);
+    for (const direction of ['bottom', 'top']) {
+      await setDirection(page, direction);
+      await caughtUp(page);
+      await scrollTo(page, direction, 0);
+      await arrive(page, `f-${direction}`, { content: long });
+      await page.locator(`.entry[data-id="f-${direction}"]`).waitFor();
+      await atEdge(page, direction, `${direction}: follows a single arrival`);
+      await settle(page);
+      await scrollTo(page, direction, 40); // inside the slack, so a top-mode prepend is anchored and has to travel
+      await arrive(page, `b1-${direction}`, { content: long });
+      await page.locator(`.entry[data-id="b1-${direction}"]`).waitFor();
+      await page.waitForTimeout(30);
+      assert.ok(await edgeGap(page, direction) > 2, `${direction}: the burst really lands during the smooth scroll`);
+      await arrive(page, `b2-${direction}`, { content: long });
+      await page.locator(`.entry[data-id="b2-${direction}"]`).waitFor();
+      await atEdge(page, direction, `${direction}: a burst still ends at the edge`);
+      await page.waitForTimeout(600);
+      assert.ok(await edgeGap(page, direction) <= 2, `${direction}: stays at the edge`);
+      await arrive(page, `b3-${direction}`, { content: long });
+      await page.locator(`.entry[data-id="b3-${direction}"]`).waitFor();
+      await atEdge(page, direction, `${direction}: still following after the burst`);
+      assert.ok(await page.locator(`.entry[data-id="b3-${direction}"]`).evaluate((node) => { const box = node.getBoundingClientRect(), view = document.querySelector('#scroll').getBoundingClientRect(); return box.top < view.bottom && box.bottom > view.top; }), `${direction}: the newest message is in view`);
+    }
+    await setDirection(page, 'bottom');
+    await caughtUp(page);
+    await scrollTo(page, 'bottom', 0);
+    await arrive(page, 'late', await lateImage(page, 'late.png'));
+    await page.locator('.entry[data-id="late"]').waitFor();
+    await atEdge(page, 'bottom', 'the arrival is followed');
+    await page.waitForFunction(() => document.querySelector('.entry[data-id="late"] .thumbnail')?.complete && document.querySelector('.entry[data-id="late"] .thumbnail').naturalWidth > 0);
+    await page.waitForTimeout(50);
+    await atEdge(page, 'bottom', 'following keeps the edge when an image loads later');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await setDirection(page, 'bottom');
+    await caughtUp(page);
+    await scrollTo(page, 'bottom', 0);
+    await page.evaluate(() => { window.instant = null; new MutationObserver(() => { const s = document.querySelector('#scroll'); requestAnimationFrame(() => { window.instant ??= s.scrollHeight - s.clientHeight - s.scrollTop; }); }).observe(document.querySelector('.river'), { childList: true }); });
+    await arrive(page, 'calm', { content: long });
+    await page.waitForFunction(() => window.instant !== null);
+    assert.ok(await page.evaluate(() => window.instant) <= 2, 'reduced motion jumps straight to the edge');
+  },
+  async 'scrolled away stays put, in both directions, until the edge is reached again'(page) {
+    for (const direction of ['bottom', 'top']) {
+      await setDirection(page, direction);
+      await caughtUp(page);
+      await scrollTo(page, direction, 600);
+      const before = await reference(page);
+      await arrive(page, `away-${direction}`, { content: 'long line\n'.repeat(10) });
+      await page.locator(`.entry[data-id="away-${direction}"]`).waitFor();
+      await page.waitForTimeout(500);
+      near(await topOf(page, before.id), before.top, `${direction}: the reference entry does not move on screen`);
+      const scrollTop = await page.locator('#scroll').evaluate((s) => s.scrollTop);
+      if (direction === 'bottom') assert.equal(scrollTop, before.scrollTop, 'bottom: scrollTop is untouched');
+      else assert.ok(scrollTop > before.scrollTop + 100, 'top: anchoring compensates for the prepend');
+      if (direction === 'top') {
+        await arrive(page, 'late-above', await lateImage(page, 'late-above.png'));
+        await page.waitForFunction(() => document.querySelector('.entry[data-id="late-above"] .thumbnail')?.naturalWidth > 0);
+        await page.waitForTimeout(100);
+        near(await topOf(page, before.id), before.top, 'top: a late image above does not move the reference entry');
+      }
+      await scrollTo(page, direction, 0);
+      await arrive(page, `back-${direction}`);
+      await page.locator(`.entry[data-id="back-${direction}"]`).waitFor();
+      await atEdge(page, direction, `${direction}: returning to the edge resumes following`);
+    }
+  },
+  async 'the earlier button keeps its anchor and never yanks to the edge'(page) {
+    await setDirection(page, 'bottom');
+    // Everything fits, so the reader is following when the history expands above them. Too little sits below
+    // the anchor to hold it at the same pixel, but the reader must not travel: the same block stays on screen.
+    await page.setViewportSize({ width: 1360, height: 1500 });
+    await settle(page);
+    assert.equal(await edgeGap(page, 'bottom'), 0, 'the unread block fits the viewport');
+    await page.locator('.earlier').click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length > 300);
+    await page.waitForTimeout(600);
+    const view = await page.locator('#scroll').evaluate((s) => s.getBoundingClientRect().bottom);
+    assert.ok(await topOf(page, 'm7') >= 0 && await topOf(page, 'm7') < view, 'expanding while following keeps the same message on screen');
+    await page.locator('.earlier').click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length < 300);
+    await page.setViewportSize({ width: 1360, height: 860 });
+    await settle(page);
+    for (const direction of ['bottom', 'top']) {
+      await setDirection(page, direction);
+      await caughtUp(page);
+      await scrollTo(page, direction, 300);
+      const before = await reference(page);
+      await page.locator('.earlier').evaluate((node) => node.click());
+      await page.waitForFunction(() => document.querySelectorAll('.entry').length > 300);
+      await page.waitForTimeout(300);
+      near(await topOf(page, before.id), before.top, `${direction}: expanding keeps the reference entry in place`);
+      await page.locator('.earlier').evaluate((node) => node.click());
+      await page.waitForFunction(() => document.querySelectorAll('.entry').length < 300);
+      await page.waitForTimeout(300);
+      near(await topOf(page, before.id), before.top, `${direction}: collapsing keeps the reference entry in place`);
+    }
+  },
+  async 'only a truly new message animates'(page) {
+    await page.evaluate(() => {
+      window.animated = []; window.popped = [];
+      new MutationObserver((records) => {
+        for (const record of records) for (const node of record.addedNodes) {
+          if (node.matches?.('.entry.arrive')) animated.push(node.dataset.id);
+          if (node.matches?.('circle.pop')) popped.push(node);
+        }
+      }).observe(document.querySelector('#scroll'), { childList: true, subtree: true });
+    });
+    const none = async (step) => assert.deepEqual(await page.evaluate(() => [animated.length, popped.length, document.querySelectorAll('.arrive, .pop').length]), [0, 0, 0], step);
+    await bump(page); await none('a revision');
+    await page.locator('#q').pressSequentially('a'); await settle(page); await none('filtering');
+    await page.locator('[data-clear="q"]').click(); await settle(page); await none('clearing a filter');
+    await page.locator('.earlier').click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 420);
+    await none('expanding earlier messages');
+    await page.locator('.earlier').click(); await settle(page); await none('collapsing');
+    await page.click('[data-collection="club"]'); await page.waitForFunction(() => document.querySelector('h1').textContent === 'Game Club');
+    await page.click('[data-collection="all"]'); await page.waitForFunction(() => document.querySelector('h1').textContent !== 'Game Club');
+    await settle(page); await none('opening a feed');
+    await arrive(page, 'recovered', { timestamp: new Date(Date.now() - 600e3).toISOString() });
+    await page.locator('.entry[data-id="recovered"]').waitFor();
+    await none('recovering an older message');
+    await arrive(page, 'fresh');
+    await page.locator('.entry[data-id="fresh"]').waitFor();
+    assert.deepEqual(await page.evaluate(() => animated), ['fresh'], 'the arrival is the only animated message');
+    assert.equal(await page.evaluate(() => popped.length), 1, 'its graph dot pops once');
+    assert.match(await page.locator('.entry[data-id="fresh"]').evaluate((node) => getComputedStyle(node).animationName), /entry-rise/);
+    await page.waitForFunction(() => !document.querySelector('.arrive, .pop'));
+    await arrive(page, 'next');
+    await page.locator('.entry[data-id="next"]').waitFor();
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.arrive')].map((node) => node.dataset.id)), ['next'], 'reused nodes do not animate again');
+  },
+  async 'being at the top reads everything; filters and chat style still need each message seen'(page) {
+    await page.setViewportSize({ width: 1360, height: 420 });
+    const readAt = () => page.evaluate(async () => (await browser.storage.local.get('collections')).collections[0].readAt);
+    const newest = await page.locator('.entry[data-id="m14"] time').evaluate((node) => Date.parse(node.dateTime));
+    const oldest = page.locator('.entry[data-id="m7"]');
+    await page.locator('.conv button[data-focus="gen"]').first().click();
+    await page.waitForTimeout(1500);
+    assert.ok(await readAt() < newest, 'a channel filter does not settle messages it hides');
+    await page.locator('[data-clear="conv"]').click();
+    assert.equal(await oldest.evaluate((node) => node.getBoundingClientRect().top > document.querySelector('#scroll').getBoundingClientRect().bottom), true, 'the oldest unread is off screen');
+    await page.locator('.newpill').waitFor({ state: 'detached' });
+    assert.equal(await readAt(), newest, 'read state reaches the newest message');
+    assert.equal(await page.locator('.entry').count(), 8, 'reading does not collapse the feed');
+    assert.equal(await page.locator('.entry.unread').count(), 0);
+  },
+  async 'chat style still advances read state only through seen messages'(page) {
+    await page.setViewportSize({ width: 1360, height: 420 });
+    await page.evaluate(() => browser.storage.local.set({ readingDirection: 'bottom' }));
+    await settle(page);
+    const newest = await page.locator('.entry[data-id="m14"] time').evaluate((node) => Date.parse(node.dateTime));
+    await page.waitForTimeout(1500);
+    assert.ok(await page.evaluate(async () => (await browser.storage.local.get('collections')).collections[0].readAt) < newest, 'the off-screen newest message stays unread');
+  },
+  async 'the direction setting orders the feed, its graph, positions and keys'(page) {
+    assert.equal(await page.evaluate(async () => (await browser.storage.local.get('readingDirection')).readingDirection), undefined);
+    const newestFirst = ['m14', 'm13', 'm12', 'm11', 'm10', 'm9', 'm8', 'm7'];
+    assert.equal(await page.inputValue('#direction'), 'top', 'top is the default on a fresh profile');
+    assert.equal(await page.locator('#direction option').first().getAttribute('value'), 'top', 'the default is listed first');
+    assert.deepEqual(await entryIds(page), newestFirst, 'a fresh profile opens newest first');
+    assert.equal(await page.locator('#scroll').evaluate((s) => s.scrollTop), 0, 'a fresh profile opens at the top');
+    assert.equal(await page.evaluate(() => [...document.querySelector('.river').children].at(-2).className.trim()), 'endcap', 'top: the up-to-date line closes the feed, so it never sits above unread messages');
+    await page.evaluate(() => browser.storage.local.set({ readingDirection: 'sideways' }));
+    await settle(page);
+    assert.equal(await page.inputValue('#direction'), 'top', 'an unknown value means top');
+    assert.deepEqual(await entryIds(page), newestFirst, 'an unknown value keeps newest first');
+    await page.click('#menubtn');
+    await page.evaluate(() => browser.storage.local.set({ readingDirection: 'bottom' }));
+    await page.waitForFunction(() => document.querySelector('.entry')?.dataset.id === 'm7');
+    assert.equal(await page.evaluate(async () => (await browser.storage.local.get('readingDirection')).readingDirection), 'bottom', 'choosing bottom persists');
+    await page.locator('h1').click();
+    await settle(page);
+    const bottomOrder = await entryIds(page);
+    assert.deepEqual(bottomOrder, ['m7', 'm8', 'm9', 'm10', 'm11', 'm12', 'm13', 'm14'], 'bottom keeps oldest to newest');
+    assert.ok(await page.evaluate(() => { const first = document.querySelector('.entry.unread').getBoundingClientRect(), scroll = document.querySelector('#scroll').getBoundingClientRect(); return first.top >= scroll.top - 1 && first.top < scroll.top + 40; }), 'bottom opens at the first unread');
+    await page.click('#menubtn');
+    await page.selectOption('#direction', 'top');
+    await page.waitForFunction(() => document.querySelector('.entry')?.dataset.id === 'm14');
+    assert.equal(await page.evaluate(async () => (await browser.storage.local.get('readingDirection')).readingDirection), 'top', 'the setting persists');
+    await page.locator('h1').click();
+    await settle(page);
+    assert.deepEqual(await entryIds(page), bottomOrder.toReversed(), 'top shows newest first');
+    assert.equal(await page.locator('#scroll').evaluate((s) => s.scrollTop), 0, 'switching opens at the top');
+    const structure = await page.evaluate(() => {
+      const kids = [...document.querySelector('.river').children], last = kids.findLastIndex((node) => node.matches('.entry'));
+      return { closing: kids.at(-2).className.trim(), cap: kids.at(-2).textContent, earlierAfterEntries: kids.findIndex((node) => node.matches('.earlier')) > last, firstEntry: kids.findIndex((node) => node.matches('.entry')), positions: [...document.querySelectorAll('.entry')].map((node) => [node.getAttribute('aria-posinset'), node.getAttribute('aria-setsize')].join('/')) };
+    });
+    assert.equal(structure.closing, 'endcap');
+    assert.match(structure.cap, new RegExp(await page.evaluate(() => browser.i18n.getMessage('feedEndTop').slice(4, 20))));
+    assert.equal(structure.earlierAfterEntries, true, 'the earlier button sits at the old end');
+    assert.deepEqual(structure.positions, bottomOrder.map((_, i) => `${i + 1}/8`), 'positions follow display order');
+    const graph = await page.evaluate(() => {
+      const river = document.querySelector('.river');
+      const parents = [...document.querySelectorAll('.entry, .conv')].every((node) => node.offsetParent === river);
+      const dots = [...document.querySelectorAll('.graph circle')].map((node) => Number(node.getAttribute('cy'))).sort((a, b) => a - b);
+      const expected = [...document.querySelectorAll('.entry')].map((node) => node.offsetTop + 17).sort((a, b) => a - b);
+      const svg = document.querySelector('.graph');
+      return { parents, dots, expected, paths: [...document.querySelectorAll('.graph path')].map((node) => node.getAttribute('d')).join(' '), height: Number(svg.getAttribute('height')), riverHeight: river.offsetHeight };
+    });
+    assert.equal(graph.parents, true, '.river is the offsetParent of entries and labels');
+    assert.deepEqual(graph.dots, graph.expected, 'every graph dot lines up with its entry');
+    assert.doesNotMatch(graph.paths, /NaN|undefined|Infinity/);
+    assert.equal(graph.height, graph.riverHeight);
+    await page.locator('h1').click();
+    await page.keyboard.press('j');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), 'm14', 'top: j selects the first message shown');
+    await page.keyboard.press('j');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), 'm13', 'top: j moves down the screen');
+    await page.keyboard.press('k');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), 'm14', 'top: k moves up the screen');
+    await page.keyboard.press('n');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), 'm13', 'top: n moves to the next unread down the screen');
+    await page.click('#menubtn');
+    await page.evaluate(() => browser.storage.local.set({ readingDirection: 'bottom' }));
+    await page.waitForFunction(() => document.querySelector('.entry')?.dataset.id === 'm7');
+    await page.locator('h1').click();
+    assert.deepEqual(await entryIds(page), bottomOrder, 'switching back restores chronological order');
+    assert.equal(await page.evaluate(() => [...document.querySelector('.river').children].at(-2).className.trim()), 'endcap', 'bottom: the endcap closes the feed, before the graph');
+  },
+  async 'the settings menu fits the sidebar and a 400px viewport'(page) {
+    const fits = () => page.evaluate(() => {
+      const menu = document.querySelector('#menu'), box = menu.getBoundingClientRect();
+      return { overflow: document.documentElement.scrollWidth > innerWidth || menu.scrollWidth > menu.clientWidth || box.left < 0 || box.right > innerWidth, escaped: [...menu.querySelectorAll('label, select, button')].filter((node) => { const rect = node.getBoundingClientRect(); return rect.width && (rect.left < box.left || rect.right > box.right); }).length };
+    });
+    await page.click('#menubtn');
+    assert.equal(await page.locator('#direction').isVisible(), true);
+    assert.deepEqual(await fits(), { overflow: false, escaped: 0 }, 'menu at the 272px sidebar');
+    await page.click('#menubtn');
+    await page.setViewportSize({ width: 400, height: 800 });
+    await settle(page);
+    await page.click('#mobilemenu');
+    assert.equal(await page.locator('#direction').isVisible(), true);
+    const narrow = await fits();
+    assert.equal(narrow.overflow, false, 'no overflow at 400px with the menu open');
+    assert.equal(narrow.escaped, 0, 'every control stays inside the menu at 400px');
+  },
+};
 let browser;
 try {
   browser = await chromium.launch();
@@ -32,6 +399,8 @@ try {
       await page.route('https://cdn.discordapp.com/**', (route) => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"/>' }));
       await page.goto(`http://127.0.0.1:${server.address().port}/viewer.html?lang=${language}#welcome`);
       await page.locator('#consent').waitFor();
+      // This flow proves the chat-style order; the default direction has its own section below.
+      await page.evaluate(() => browser.storage.local.set({ readingDirection: 'bottom' }));
       assert.equal(await page.evaluate(async () => (await browser.storage.local.get('consentedAt')).consentedAt), undefined);
       await page.click('#consent');
       await page.locator('#create-first').waitFor();
@@ -124,8 +493,28 @@ try {
       await page.click('#edit');
       assert.equal(await page.evaluate(() => document.querySelector('.sheet').scrollWidth > innerWidth), false, 'no sheet overflow at 400px');
       await page.click('#scancel');
+      // Same guarantees in the chat-style direction: sections above run on the default.
+const revisionsSection = 'revisions and read state keep every node, scroll, focus and typed text';
+sections[`${revisionsSection} (chat style)`] = async (page) => { await setDirection(page, 'bottom'); await sections[revisionsSection](page); };
+const failures = [];
+      for (const [name, section] of Object.entries(sections)) {
+        const sectionPage = await context.newPage();
+        sectionPage.setDefaultTimeout(10000);
+        sectionPage.on('pageerror', (error) => errors.push(`${name}: ${error.message}`));
+        try {
+          await sectionPage.route('https://cdn.discordapp.com/**', (route) => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"/>' }));
+          await sectionPage.goto(`http://127.0.0.1:${server.address().port}/viewer.html?lang=${language}`);
+          await sectionPage.locator('#consent').click();
+          await sectionPage.locator('#create-first').waitFor();
+          await sectionPage.locator('#overlay button.btn').click();
+          await sectionPage.locator('.entry').first().waitFor();
+          await section(sectionPage);
+        } catch (error) { failures.push(`${name}: ${error.message.split('\n').slice(0, 12).join(' ')}`); }
+        finally { await sectionPage.close(); }
+      }
+      assert.deepEqual(failures, [], `${language} reading flow`);
       assert.deepEqual(errors, [], `${language} viewer page errors`);
-      console.log(`Viewer ${language}/${colorScheme}: save, create, revisions and 400px layout passed`);
+      console.log(`Viewer ${language}/${colorScheme}: save, create, revisions, 400px layout and ${Object.keys(sections).length} reading flow sections passed`);
     } finally { await context.close(); }
   }
 } finally {

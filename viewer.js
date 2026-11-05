@@ -28,7 +28,7 @@ const hm = (date) => new Date(date).toLocaleTimeString([], { hour: '2-digit', mi
 const THREAD_TYPES = [10, 11, 12], NOT_LISTENABLE = [4, ...THREAD_TYPES], MAX_SHOWN = 400;
 const EMOJIS = ['\u{1f4e3}', '\u2b50', '\u{1f3a8}', '\u{1f6e0}', '\u{1f3ae}', '\u{1f4c1}'];
 let S = { collections: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], stats: {}, buckets: Array(24).fill(0), people: new Map() };
-const ui = { collection: null, src: '', conv: '', q: '', hover: null, edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
+const ui = { collection: null, src: '', conv: '', q: '', edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
 const collection = () => S.collections.find((c) => c.id === ui.collection);
 const isThread = (id) => THREAD_TYPES.includes(S.chans[id]?.type);
 const baseChannel = (m) => isThread(m.channel_id) ? S.chans[m.channel_id]?.parent_id : m.channel_id;
@@ -39,10 +39,31 @@ const guildName = (id) => S.guilds[id] ?? t('server');
 const emojiOf = (c) => c.emoji ?? (c.all ? '\u{1f310}' : '\u{1f4c1}');
 const isDark = () => S.theme === 'dark' || (S.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
 const laneColor = (id) => `var(--l${laneIndex(id)})`;
+// Apply `next` over the children of `parent`, keeping every node that can stay: images, running animations,
+// focus and typed input survive. Handlers on patched nodes must not close over per-render state (use delegation).
+function morph(node, next) {
+  if (node.nodeType === Node.TEXT_NODE) { node.data = next.data; return; }
+  for (const name of node.getAttributeNames()) if (!next.hasAttribute(name)) node.removeAttribute(name);
+  for (const name of next.getAttributeNames()) if (node.getAttribute(name) !== next.getAttribute(name)) node.setAttribute(name, next.getAttribute(name));
+  patch(node, [...next.childNodes]);
+}
+function patch(parent, next) {
+  let current = parent.firstChild;
+  for (const node of next) {
+    const following = current?.nextSibling ?? null;
+    if (!current) parent.append(node);
+    else if (!current.isEqualNode(node)) {
+      if (current.nodeName === node.nodeName && current.nodeName !== 'IMG') morph(current, node); else current.replaceWith(node);
+    }
+    current = following;
+  }
+  while (current) { const following = current.nextSibling; current.remove(); current = following; }
+}
 const initials = (name) => String(name).split(/\s+/).map((word) => word[0]).join('').slice(0, 2).toUpperCase();
+const failedImages = new Set(); // a patch must not bring a broken image back and flash it again
 function imageOrInitial(src, name, cls) {
   const fallback = () => el('span', { class: cls }, initials(name));
-  return src ? el('img', { class: cls, alt: '', src, onerror: (ev) => ev.target.replaceWith(fallback()) }) : fallback();
+  return src && !failedImages.has(src) ? el('img', { class: cls, alt: '', src, onerror: (ev) => { failedImages.add(src); ev.target.replaceWith(fallback()); } }) : fallback();
 }
 const fav = (id) => imageOrInitial(S.icons[id] ? `https://cdn.discordapp.com/icons/${encodeURIComponent(id)}/${encodeURIComponent(S.icons[id])}.png?size=64` : null, guildName(id), 'fav');
 function avatar(author = {}, guild) {
@@ -55,8 +76,8 @@ function avatar(author = {}, guild) {
 }
 let settingsKey, collectionsKey;
 async function load(force = false) {
-  const settings = await store.get(['collections', 'lastSignal', 'theme', 'rev', 'health', 'consentedAt', 'retentionDays']);
-  const key = JSON.stringify([settings.collections, settings.theme, settings.health, settings.consentedAt, settings.retentionDays]);
+  const settings = await store.get(['collections', 'lastSignal', 'theme', 'rev', 'health', 'consentedAt', 'retentionDays', 'readingDirection']);
+  const key = JSON.stringify([settings.collections, settings.theme, settings.health, settings.consentedAt, settings.retentionDays, settings.readingDirection]);
   const revised = S.rev !== settings.rev || settingsKey === undefined;
   if (!force && !revised && key === settingsKey) return false;
   const nextCollectionsKey = JSON.stringify(settings.collections ?? []);
@@ -65,7 +86,7 @@ async function load(force = false) {
   S.collections = settings.collections ?? [];
   if (pending && !S.collections.some((c) => c.id === pending.id)) S.collections.push(pending);
   if (!S.collections.some((c) => c.id === ui.collection)) ui.collection = S.collections[0]?.id ?? null;
-  Object.assign(S, { lastSignal: settings.lastSignal, theme: settings.theme ?? 'system', health: settings.health, consentedAt: settings.consentedAt, retentionDays: settings.retentionDays ?? 14 });
+  Object.assign(S, { lastSignal: settings.lastSignal, theme: settings.theme ?? 'system', health: settings.health, consentedAt: settings.consentedAt, retentionDays: settings.retentionDays ?? 14, direction: settings.readingDirection === 'bottom' ? 'bottom' : 'top' });
   if (revised) {
     const [channels, events] = await Promise.all([feedDB.channels(), feedDB.events(Date.now() - 864e5)]);
     S.chans = Object.fromEntries(channels.map((c) => [c.id, c])); S.guilds = {}; S.icons = {}; S.events = events;
@@ -96,12 +117,12 @@ function renderStatus() {
   const keys = { ok: 'healthOk', 'no-tab': 'healthNoTab', broken: 'healthBroken', 'multi-tab': 'healthMultiTab', 'not-consented': 'healthNotConsented' };
   const status = $('#status'); status.className = `status ${state === 'ok' ? '' : 'off'}`;
   const ageLabel = !S.lastSignal ? t('never') : age < 60 ? t('secondsAgo', [Math.max(1, Math.round(age))]) : age < 3600 ? t('minutesAgo', [Math.round(age / 60)]) : fmtFull(S.lastSignal);
-  status.replaceChildren(el('div', { class: 'row' }, el('span', { class: 'pulse' }), el('b', {}, t(state === 'ok' ? 'listening' : 'noSignal')), el('small', {}, ageLabel)), el('p', { class: 'health-copy' }, t(keys[state] ?? 'healthBroken')));
-  if (state === 'not-consented') status.append(button(t('welcome'), { class: 'textbtn', onclick: () => showWelcome() }));
-  if (state === 'no-tab') status.append(link(t('openDiscordStep'), 'https://discord.com/app'));
+  const parts = [el('div', { class: 'row' }, el('span', { class: 'pulse' }), el('b', {}, t(state === 'ok' ? 'listening' : 'noSignal')), el('small', {}, ageLabel)), el('p', { class: 'health-copy' }, t(keys[state] ?? 'healthBroken'))];
+  if (state === 'not-consented') parts.push(button(t('welcome'), { class: 'textbtn', onclick: () => showWelcome() }));
+  if (state === 'no-tab') parts.push(link(t('openDiscordStep'), 'https://discord.com/app'));
   const gaps = S.events.filter((e) => e.type === 'gap' && (e.to ?? e.at) > Date.now() - 864e5);
   const max = Math.max(1, ...S.buckets);
-  status.append(el('div', { class: 'spark', title: t('hourlyCapture') }, S.buckets.map((n, i) => {
+  parts.push(el('div', { class: 'spark', title: t('hourlyCapture') }, S.buckets.map((n, i) => {
     const gap = gaps.find((g) => g.from < Date.now() - (23 - i) * 36e5 && g.to > Date.now() - (24 - i) * 36e5);
     return el('i', { class: gap ? gapCovered(gap) ? 'covered' : 'gap' : n ? '' : 'none', style: { height: `${10 + n / max * 90}%` } });
   })), el('div', { class: 'legend' }, t('dayAgo'), el('span', {}, t(gaps.length ? 'coverageGaps' : 'noGaps')), t('now')));
@@ -109,30 +130,30 @@ function renderStatus() {
     const covered = gapCovered(gap);
     const row = el('div', { class: `gap-row ${covered ? 'covered' : ''}` }, el('span', { title: t('gapRange', [fmtFull(gap.from), fmtFull(gap.to)]) }, t('gapAt', [hm(gap.from)])));
     if (covered) row.append(el('span', {}, t('gapCovered')));
-    else row.append(button(t('recover'), { class: 'textbtn', onclick: () => showRecovery(gap) }));
-    status.append(row);
+    else row.append(button(t('recover'), { class: 'textbtn', 'data-gap': gap.from }));
+    parts.push(row);
   }
+  patch(status, parts);
   if ($('#guide-signal')) { $('#guide-signal').textContent = t(state === 'ok' ? 'greenSignal' : 'waitSignal'); $('#guide-signal').classList.toggle('covered', state === 'ok'); }
 }
 function renderSide() {
   const side = $('#side');
-  side.replaceChildren(el('div', { class: 'group' }, el('span', {}, t('collections')), button('+', { id: 'add', 'aria-label': t('newCollection'), title: t('newCollection') })));
+  const nodes = [el('div', { class: 'group' }, el('span', {}, t('collections')), button('+', { id: 'add', 'aria-label': t('newCollection'), title: t('newCollection') }))];
   for (const c of S.collections) {
     const n = S.stats[c.id]?.unread ?? 0;
-    side.append(button([el('span', { class: 'em' }, emojiOf(c)), el('span', { class: 'nm' }, c.name), el('span', { class: 'n' }, n > 999 ? '999+' : n || '')], { class: `item ${c.id === ui.collection ? 'on' : ''} ${n ? 'unread' : ''}`, 'data-collection': c.id }));
+    nodes.push(button([el('span', { class: 'em' }, emojiOf(c)), el('span', { class: 'nm' }, c.name), el('span', { class: 'n' }, n > 999 ? '999+' : n || '')], { class: `item ${c.id === ui.collection ? 'on' : ''} ${n ? 'unread' : ''}`, 'data-collection': c.id }));
   }
   const c = collection();
   if (c) {
     const sources = Object.keys(S.stats[c.id]?.guilds ?? {}).sort((a, b) => guildName(a).localeCompare(guildName(b)));
     if (ui.src && !sources.includes(ui.src)) ui.src = '';
-    if (sources.length) side.append(el('div', { class: 'group' }, t('sourcesIn', [c.name])));
-    for (const id of sources) side.append(button([fav(id), el('span', { class: 'nm' }, guildName(id)), el('span', { class: 'n' }, S.stats[c.id]?.guilds[id] || '')], { class: `item ${ui.src === id ? 'on' : ''}`, 'data-src': id }));
+    if (sources.length) nodes.push(el('div', { class: 'group' }, t('sourcesIn', [c.name])));
+    for (const id of sources) nodes.push(button([fav(id), el('span', { class: 'nm' }, guildName(id)), el('span', { class: 'n' }, S.stats[c.id]?.guilds[id] || '')], { class: `item ${ui.src === id ? 'on' : ''}`, 'data-src': id }));
   }
+  patch(side, nodes);
   renderStatus();
 }
 function renderHead(c, list) {
-  const focus = document.activeElement?.id === 'q';
-  const selection = focus ? [$('#q').selectionStart, $('#q').selectionEnd] : null;
   const n = list.filter((m) => isUnread(c, m)).length;
   const sources = new Set(c.ids.map((id) => S.chans[id]?.guild_id).filter(Boolean)).size;
   const sub = el('div', { class: 'subrow' }, el('span', { class: n ? 'newpill' : 'mono' }, n ? t(n === 1 ? 'newCountOne' : 'newCountMany', [n]) : t('upToDate')),
@@ -141,9 +162,9 @@ function renderHead(c, list) {
     if (value) sub.append(el('span', { class: 'chipf' }, el('span', {}, value), button('\u00d7', { 'data-clear': key, 'aria-label': t(key === 'q' ? 'clearSearch' : 'removeFilter') })));
   }
   sub.append(el('span', { class: 'grow' }), button(t('markRead'), { class: 'textbtn', id: 'markread' }));
-  $('#head').replaceChildren(el('div', { class: 'titlerow' }, el('span', { class: 'em' }, emojiOf(c)), el('h1', {}, c.name), button('\u270e', { class: 'iconbtn', id: 'edit', 'aria-label': t('editCollection'), title: t('editCollection') }), el('span', { class: 'grow' }),
-    el('label', { class: 'search' }, el('input', { id: 'q', placeholder: t('searchIn', [c.name]), value: ui.q, 'aria-label': t('search') })), button(isDark() ? '\u2600' : '\u263e', { class: 'iconbtn', id: 'themebtn', 'aria-label': t('changeTheme'), title: t('changeTheme') }), button('\u22ef', { class: 'iconbtn', id: 'mobilemenu', 'aria-label': t('settings') })), sub);
-  if (focus) { $('#q').focus(); $('#q').setSelectionRange(...selection); }
+  patch($('#head'), [el('div', { class: 'titlerow' }, el('span', { class: 'em' }, emojiOf(c)), el('h1', {}, c.name), button('\u270e', { class: 'iconbtn', id: 'edit', 'aria-label': t('editCollection'), title: t('editCollection') }), el('span', { class: 'grow' }),
+    el('label', { class: 'search' }, el('input', { id: 'q', placeholder: t('searchIn', [c.name]), value: ui.q, 'aria-label': t('search') })), button(isDark() ? '\u2600' : '\u263e', { class: 'iconbtn', id: 'themebtn', 'aria-label': t('changeTheme'), title: t('changeTheme') }), button('\u22ef', { class: 'iconbtn', id: 'mobilemenu', 'aria-label': t('settings') })), sub]);
+  if ($('#q').value !== ui.q) $('#q').value = ui.q;
 }
 function richNodes(tokens) {
   return tokens.map((token) => {
@@ -173,14 +194,15 @@ function attachment(file) {
   const original = cdn(file.url), proxy = cdn(file.proxy_url);
   if (!proxy && !original) return card();
   const src = new URL(proxy ?? original); src.searchParams.set('width', '320'); src.searchParams.set('height', '240');
-  const image = el('img', { src: src.href, alt: name, loading: 'lazy', class: 'thumbnail', width: Math.min(file.width || 320, 320), onerror: () => {
+  // Same fit as the sized request: the box is reserved before the image arrives, so the feed does not reflow.
+  const fit = file.width > 0 && file.height > 0 ? Math.min(1, 320 / file.width, 240 / file.height) : 0;
+  const image = el('img', { src: src.href, alt: name, loading: 'lazy', class: 'thumbnail', width: Math.min(file.width || 320, 320), style: fit ? { width: `${Math.round(file.width * fit)}px`, aspectRatio: `${file.width} / ${file.height}` } : undefined, onerror: () => {
     if (original && image.dataset.fallback !== 'original') { image.dataset.fallback = 'original'; image.src = original; }
     else image.parentElement.replaceWith(card());
   } });
   return link(image, file.url, { class: 'image-attachment' });
 }
-function messageNode(m, index, total, c) {
-  const reply = S.msgs.find((x) => x.id === m.reply_to);
+function messageNode(m, reply) {
   const href = `https://discord.com/channels/${encodeURIComponent(m.guild_id)}/${encodeURIComponent(m.channel_id)}/${encodeURIComponent(m.id)}`;
   const header = el('div', { class: 'h' }, el('span', { class: 'who' }, m.author?.name ?? '?'), el('time', { class: 't', title: fmtFull(m.timestamp), datetime: m.timestamp }, hm(m.timestamp)), link([fav(m.guild_id), `#${chanName(m.channel_id)}`], href, { class: 'where', title: t('openInDiscord') }));
   if (m.reply_to) header.append(el('span', { class: 're' }, `\u21b3 ${reply?.author?.name ?? t('reply')}`));
@@ -190,29 +212,135 @@ function messageNode(m, index, total, c) {
   const extras = [...(m.stickers ?? []).map((s) => t('stickerLabel', [s])), m.embeds ? t('embedCount', [m.embeds]) : ''].filter(Boolean);
   if (extras.length) body.append(el('div', { class: 'tag' }, extras.join(' \u00b7 ')));
   body.append(...(m.attachments ?? []).map(attachment));
-  return el('article', { class: `entry ${isUnread(c, m) ? 'unread' : ''} ${m.deleted_at ? 'deleted' : ''}`, tabindex: '0', 'data-c': m.channel_id, 'data-id': m.id, 'aria-posinset': index + 1, 'aria-setsize': total }, avatar(m.author, m.guild_id), body,
+  return el('article', { class: `entry ${m.deleted_at ? 'deleted' : ''}`, tabindex: '0', 'data-id': m.id }, avatar(m.author, m.guild_id), body,
     el('div', { class: 'tools' }, button('\u25ce', { 'data-focus': m.channel_id, 'aria-label': t('focusChannel'), title: t('focusChannel') }), link('\u2197', href, { 'aria-label': t('openInDiscord'), title: t('openInDiscord') })));
 }
-let riverResize;
+// The river stays mounted: nodes are reused by key, so a re-render never reloads images, resets a revealed
+// spoiler, restarts an animation or disturbs native scroll anchoring. Only content that changed is touched.
+const riverNodes = new Map(), FOLLOW_SLACK = 80;
+let river, graph;
+function keyed(key, signature, build) {
+  const hit = riverNodes.get(key);
+  if (hit?.signature === signature) return hit.node;
+  const next = build();
+  if (hit) morph(hit.node, next);
+  riverNodes.set(key, { signature, node: hit?.node ?? next });
+  return hit?.node ?? next;
+}
+function messageSignature(m, reply) {
+  const refs = String(m.content ?? '').match(/<(?:#|@!?)\d+>/g)?.map((ref) => ref[1] === '#' ? chanName(ref.slice(2, -1)) : S.people.get(ref.replace(/\D/g, '')));
+  return JSON.stringify([m.author, m.timestamp, m.content, m.channel_id, m.guild_id, m.reply_to, m.edited_timestamp, m.deleted_at, m.stickers, m.embeds, m.attachments,
+    chanName(m.channel_id), guildName(m.guild_id), S.icons[m.guild_id], reply?.author?.name, refs]);
+}
+function mountRiver() {
+  if (river) return;
+  river = el('div', { class: 'river', role: 'feed', 'aria-label': t('messageFeed') });
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'graph'); svg.setAttribute('aria-hidden', 'true');
+  // Lines are redrawn; dots persist so a running pop survives the redraw that a growing river triggers.
+  const lines = document.createElementNS(svg.namespaceURI, 'g'), dots = document.createElementNS(svg.namespaceURI, 'g');
+  svg.append(lines, dots); river.append(svg);
+  graph = { svg, lines, dots, dotById: new Map() };
+  new ResizeObserver(() => { if (river.isConnected) { draw(); syncFollow(); } }).observe(river);
+  $('#scroll').addEventListener('animationend', (event) => { if (['entry-tint', 'dot-pop'].includes(event.animationName)) event.target.classList.remove('arrive', 'pop'); });
+}
+function showEmpty(node) {
+  const scroll = $('#scroll');
+  for (const { node: stale } of riverNodes.values()) stale.remove();
+  river?.remove(); riverNodes.clear(); graph?.dots.replaceChildren(); graph?.dotById.clear(); patch(scroll, [node]);
+  ui.follow = true; ui.lastTop = 0; ui.riverHeight = 0;
+}
+function draw() {
+  const { svg, lines, dots, dotById, list, laneIds, convs, convOf, replies, labels, entries, gut, x, arrivals } = graph;
+  const y = (node) => node.offsetTop + 17;
+  const shapes = [];
+  const line = (attrs) => shapes.push(attrs);
+  const wanted = new Map();
+  for (const id of laneIds) {
+    const members = list.filter((m) => m.channel_id === id);
+    if (!members.length) {
+      const branches = [...convs.values()].filter((lane) => lane.parent_id === id).map((lane) => y(labels.get(lane.id)));
+      line({ stroke: laneColor(id), d: `M3 ${Math.min(...branches) - 24} Q${x(id)} ${Math.min(...branches) - 24} ${x(id)} ${Math.min(...branches) - 12} L${x(id)} ${Math.max(...branches) - 12}` });
+      continue;
+    }
+    const start = y(labels.get(id)), end = y(entries.get(members.at(-1).id));
+    const parent = convs.get(id).parent_id;
+    const origin = parent ? x(parent) : 3;
+    line({ stroke: laneColor(id), d: `M${origin} ${start - 12} Q${x(id)} ${start - 12} ${x(id)} ${start + 6} L${x(id)} ${end}` });
+    for (const m of members) {
+      const top = y(entries.get(m.id));
+      line({ stroke: laneColor(id), opacity: '.3', d: `M${x(id)} ${top} L${gut - 5} ${top}` });
+      wanted.set(m.id, { cx: x(id), cy: top, r: 4, fill: laneColor(id) });
+    }
+  }
+  for (const reply of replies) {
+    const a = x(convOf.get(reply.from)), b = x(convOf.get(reply.to)), from = y(entries.get(reply.from)), to = y(entries.get(reply.to));
+    line({ class: 'reply-arc', stroke: 'var(--soft)', opacity: '.35', d: `M${a} ${from} C${Math.max(a, b) + 12} ${from} ${Math.max(a, b) + 12} ${to} ${b} ${to}` });
+  }
+  svg.setAttribute('width', gut); svg.setAttribute('height', river.offsetHeight);
+  const shape = (tag, attrs, node = document.createElementNS(svg.namespaceURI, tag)) => { for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); return node; };
+  const signature = JSON.stringify(shapes);
+  if (signature !== graph.signature) { graph.signature = signature; lines.replaceChildren(...shapes.map((attrs) => shape('path', attrs))); }
+  for (const [id, dot] of dotById) if (!wanted.has(id)) { dot.remove(); dotById.delete(id); }
+  for (const [id, attrs] of wanted) {
+    if (dotById.has(id)) { shape('circle', attrs, dotById.get(id)); continue; }
+    const dot = shape('circle', attrs); if (arrivals.has(id)) dot.classList.add('pop');
+    dotById.set(id, dot); dots.append(dot);
+  }
+}
+const newestEdgeGap = (s) => S.direction === 'top' ? s.scrollTop : s.scrollHeight - s.clientHeight - s.scrollTop;
+// scrollTop is mid-flight during a smooth scroll, so "at the edge" is a remembered state, not a render-time reading.
+// Only moving away from the newest edge clears it; programmatic scrolling toward the edge never does.
+function trackFollow() {
+  const s = $('#scroll'), top = s.scrollTop;
+  if (newestEdgeGap(s) <= FOLLOW_SLACK) ui.follow = true;
+  else if (S.direction === 'top' ? top > ui.lastTop : top < ui.lastTop) ui.follow = false;
+  ui.lastTop = top;
+}
+function settleFollow() { const s = $('#scroll'); ui.lastTop = s.scrollTop; ui.follow = newestEdgeGap(s) <= FOLLOW_SLACK; ui.riverHeight = river.offsetHeight; }
+function syncFollow() {
+  const s = $('#scroll'), height = river.offsetHeight;
+  if (height === ui.riverHeight) return;
+  ui.riverHeight = height;
+  if (!ui.follow) return;
+  // Reading scrollTop applies pending anchoring: a prepend must not read as moving away from the edge.
+  ui.lastTop = s.scrollTop;
+  s.scrollTo({ top: S.direction === 'top' ? 0 : s.scrollHeight, behavior: document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+}
+async function toggleEarlier() {
+  const scroll = $('#scroll');
+  const anchor = [...scroll.querySelectorAll('.entry')].find((entry) => entry.getBoundingClientRect().bottom >= scroll.getBoundingClientRect().top);
+  const id = anchor?.dataset.id, before = anchor?.getBoundingClientRect().top;
+  ui.follow = false;
+  if (!ui.expanded && !ui.fullHistory) { ui.fullHistory = true; await refresh(true); }
+  ui.expanded = !ui.expanded; renderRiver();
+  const next = [...scroll.querySelectorAll('.entry')].find((entry) => entry.dataset.id === id);
+  if (next) scroll.scrollTop += next.getBoundingClientRect().top - before;
+  settleFollow();
+}
+function feedMessages(c) {
+  const q = ui.q.toLowerCase();
+  return S.msgs.filter((m) => inCollection(c, m) && (!ui.src || m.guild_id === ui.src) && (!ui.conv || m.channel_id === ui.conv) && (!q || `${m.content ?? ''} ${m.author?.name ?? ''}`.toLowerCase().includes(q)));
+}
 function renderRiver() {
   const c = collection(), scroll = $('#scroll');
   const focusedId = document.activeElement?.closest('.entry')?.dataset.id;
-  if (!c) { $('#head').replaceChildren(); scroll.replaceChildren(el('div', { class: 'empty' }, el('h2', {}, t('noCollections')), el('p', {}, t('createCollectionHint')), button(t('newCollection'), { class: 'btn primary', id: 'add2' }))); return; }
-  const key = JSON.stringify([c.id, ui.src, ui.conv, ui.q]);
+  if (!c) { $('#head').replaceChildren(); showEmpty(el('div', { class: 'empty' }, el('h2', {}, t('noCollections')), el('p', {}, t('createCollectionHint')), button(t('newCollection'), { class: 'btn primary', id: 'add2' }))); return; }
+  const key = JSON.stringify([c.id, c.ids, S.direction, ui.src, ui.conv, ui.q]);
   const changed = key !== ui.feedKey;
-  if (changed) { ui.expanded = false; ui.seen.clear(); ui.visibleSince.clear(); ui.openReadAt = c.readAt ?? 0; }
-  const all = S.msgs.filter((m) => inCollection(c, m));
-  const q = ui.q.toLowerCase();
-  const filtered = all.filter((m) => (!ui.src || m.guild_id === ui.src) && (!ui.conv || m.channel_id === ui.conv) && (!q || `${m.content ?? ''} ${m.author?.name ?? ''}`.toLowerCase().includes(q)));
+  const filtered = feedMessages(c);
+  if (changed) { ui.expanded = false; ui.seen.clear(); ui.visibleSince.clear(); ui.openReadAt = displayBoundary(filtered, c.readAt ?? 0); }
   const order = readingOrder(filtered, ui.openReadAt ?? c.readAt ?? 0, ui.expanded);
-  const list = order.visible;
   renderHead(c, filtered);
-  const keep = scroll.scrollTop;
-  if (!list.length) {
-    scroll.replaceChildren(el('div', { class: 'empty' }, el('h2', {}, t(!c.all && !c.ids.length ? 'emptyCollection' : all.length ? 'nothingHere' : 'noMessages')), el('p', {}, t(!c.all && !c.ids.length ? 'chooseSourcesHint' : all.length ? 'noMatches' : 'messagesHint')), ...(!c.all && !c.ids.length ? [button(t('chooseChannels'), { class: 'btn primary', id: 'emptyedit' })] : [])));
-    ui.feedKey = key; return;
+  ui.feedKey = key;
+  if (!order.visible.length) {
+    const hasMessages = S.msgs.some((m) => inCollection(c, m));
+    showEmpty(el('div', { class: 'empty' }, el('h2', {}, t(!c.all && !c.ids.length ? 'emptyCollection' : hasMessages ? 'nothingHere' : 'noMessages')), el('p', {}, t(!c.all && !c.ids.length ? 'chooseSourcesHint' : hasMessages ? 'noMatches' : 'messagesHint')), ...(!c.all && !c.ids.length ? [button(t('chooseChannels'), { class: 'btn primary', id: 'emptyedit' })] : [])));
+    if (changed) ui.newestShown = -Infinity;
+    return;
   }
-  const { convs, replies } = assignConversations(list, { isThread, channelName: chanName, threadName: chanName, parentId: (id) => S.chans[id]?.parent_id });
+  const top = S.direction === 'top';
+  const list = top ? [...order.visible].reverse() : order.visible;
+  const { convs, convOf, replies } = assignConversations(order.visible, { isThread, channelName: chanName, threadName: chanName, parentId: (id) => S.chans[id]?.parent_id });
   // Every channel keeps its own lane. Narrow screens compress spacing instead of merging lanes.
   const laneIds = [...new Set([...convs.keys(), ...[...convs.values()].map((lane) => lane.parent_id).filter(Boolean)])].sort((a, b) => {
     if (a === b) return 0;
@@ -222,78 +350,54 @@ function renderRiver() {
   const gap = Math.min(16, 90 / Math.max(1, laneIds.length));
   const x = (id) => 10 + Math.max(0, laneIds.indexOf(id)) * gap;
   const gut = Math.ceil(28 + laneIds.length * gap);
-  const river = el('div', { class: 'river', role: 'feed', 'aria-label': t('messageFeed'), style: { '--gut': `${gut}px` } });
+  mountRiver();
+  river.style.setProperty('--gut', `${gut}px`);
+  const oldEnd = [];
   const earlierCount = !ui.src && !ui.conv && !ui.q ? Math.max(order.earlier.length, (S.stats[c.id]?.total ?? S.msgs.length) - order.unread.length) : order.earlier.length;
-  if (earlierCount && order.unread.length) river.append(button(t('earlierRead', [earlierCount]), { class: 'textbtn earlier', 'aria-expanded': String(ui.expanded), onclick: async () => {
-    const anchor = [...river.querySelectorAll('.entry')].find((entry) => entry.getBoundingClientRect().bottom >= scroll.getBoundingClientRect().top);
-    const id = anchor?.dataset.id, before = anchor?.getBoundingClientRect().top;
-    if (!ui.expanded && !ui.fullHistory) { ui.fullHistory = true; await refresh(true); }
-    ui.expanded = !ui.expanded; renderRiver();
-    const next = [...scroll.querySelectorAll('.entry')].find((entry) => entry.dataset.id === id);
-    if (next) scroll.scrollTop += next.getBoundingClientRect().top - before;
-  } }));
-  if ((S.stats[c.id]?.total ?? 0) > S.msgs.length) river.append(el('div', { class: 'more' }, t('recentLimit', [S.msgs.length, S.stats[c.id].total])));
-  const labels = new Map(), entries = new Map(); let day;
+  if (earlierCount && order.unread.length) oldEnd.push(keyed('earlier', JSON.stringify([earlierCount, ui.expanded]), () => button(t('earlierRead', [earlierCount]), { class: 'textbtn earlier', 'aria-expanded': String(ui.expanded), onclick: () => toggleEarlier().catch(reportError) })));
+  if ((S.stats[c.id]?.total ?? 0) > S.msgs.length) { const text = t('recentLimit', [S.msgs.length, S.stats[c.id].total]); oldEnd.push(keyed('more', text, () => el('div', { class: 'more' }, text))); }
+  const endcap = keyed('endcap', S.direction, () => el('div', { class: 'endcap' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '\u2713'), t(top ? 'feedEndTop' : 'feedEnd')));
+  const byId = new Map(S.msgs.map((m) => [m.id, m]));
+  const today = new Date().toDateString(), yesterday = new Date(Date.now() - 864e5).toDateString();
+  const feed = [], labels = new Map(), entries = new Map(), arrivals = new Set();
+  let day, newest = -Infinity;
   list.forEach((m, index) => {
-    const date = new Date(m.timestamp).toDateString();
-    if (date !== day) { day = date; river.append(el('div', { class: 'day' }, date === new Date().toDateString() ? t('today') : date === new Date(Date.now() - 864e5).toDateString() ? t('yesterday') : new Date(m.timestamp).toLocaleDateString())); }
+    const date = new Date(m.timestamp).toDateString(), time = Date.parse(m.timestamp);
+    if (date !== day) { day = date; const text = date === today ? t('today') : date === yesterday ? t('yesterday') : new Date(m.timestamp).toLocaleDateString(); feed.push(keyed(`day:${date}`, text, () => el('div', { class: 'day' }, text))); }
     if (!labels.has(m.channel_id)) {
-      const label = el('div', { class: 'conv', 'data-c': m.channel_id, style: { '--c': laneColor(m.channel_id) } }, button([fav(m.guild_id), el('span', { class: 'tt' }, `${isThread(m.channel_id) ? t('threadPrefix') : ''}#${chanName(m.channel_id)}`)], { 'data-focus': m.channel_id, title: t('focusChannel') }), el('span', { class: 'cm' }, `${guildName(m.guild_id)}${isThread(m.channel_id) ? ` \u00b7 #${chanName(S.chans[m.channel_id]?.parent_id)}` : ''} \u00b7 ${t(convs.get(m.channel_id).count === 1 ? 'messageCountOne' : 'messageCountMany', [convs.get(m.channel_id).count])}`));
-      labels.set(m.channel_id, label); river.append(label);
+      const title = `${isThread(m.channel_id) ? t('threadPrefix') : ''}#${chanName(m.channel_id)}`;
+      const meta = `${guildName(m.guild_id)}${isThread(m.channel_id) ? ` \u00b7 #${chanName(S.chans[m.channel_id]?.parent_id)}` : ''} \u00b7 ${t(convs.get(m.channel_id).count === 1 ? 'messageCountOne' : 'messageCountMany', [convs.get(m.channel_id).count])}`;
+      const label = keyed(`conv:${m.channel_id}`, JSON.stringify([title, meta, m.guild_id, S.icons[m.guild_id]]), () => el('div', { class: 'conv', style: { '--c': laneColor(m.channel_id) } }, button([fav(m.guild_id), el('span', { class: 'tt' }, title)], { 'data-focus': m.channel_id, title: t('focusChannel') }), el('span', { class: 'cm' }, meta)));
+      labels.set(m.channel_id, label); feed.push(label);
     }
-    const entry = messageNode(m, index, list.length, c); entries.set(m.id, entry); river.append(entry);
+    const reply = byId.get(m.reply_to), fresh = !riverNodes.has(`m:${m.id}`);
+    const entry = keyed(`m:${m.id}`, messageSignature(m, reply), () => messageNode(m, reply));
+    entry.classList.toggle('unread', isUnread(c, m));
+    entry.setAttribute('aria-posinset', index + 1); entry.setAttribute('aria-setsize', list.length);
+    // Only messages newer than anything already on screen animate: never opening, filtering or expanding.
+    if (fresh && !changed && time > ui.newestShown) { entry.classList.add('arrive'); arrivals.add(m.id); }
+    entries.set(m.id, entry); feed.push(entry); newest = Math.max(newest, time);
   });
-  river.append(el('div', { class: 'endcap' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '\u2713'), t('feedEnd')));
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'graph'); svg.setAttribute('aria-hidden', 'true'); river.append(svg);
-  scroll.replaceChildren(river);
-  const draw = () => {
-    if (!river.isConnected) return;
-    const top = river.getBoundingClientRect().top;
-    const y = (node) => node.getBoundingClientRect().top - top + 17;
-    const shape = (tag, attrs) => { const node = document.createElementNS(svg.namespaceURI, tag); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); svg.append(node); };
-    svg.replaceChildren(); svg.setAttribute('width', gut); svg.setAttribute('height', river.scrollHeight);
-    for (const id of laneIds) {
-      const nodes = list.filter((m) => m.channel_id === id).map((m) => entries.get(m.id));
-      if (!nodes.length) {
-        const branches = [...convs.values()].filter((lane) => lane.parent_id === id).map((lane) => y(labels.get(lane.id)));
-        shape('path', { 'data-c': id, stroke: laneColor(id), d: `M3 ${Math.min(...branches) - 24} Q${x(id)} ${Math.min(...branches) - 24} ${x(id)} ${Math.min(...branches) - 12} L${x(id)} ${Math.max(...branches) - 12}` });
-        continue;
-      }
-      const start = y(labels.get(id)), end = y(nodes.at(-1));
-      const parent = convs.get(id).parent_id;
-      const origin = parent ? x(parent) : 3;
-      shape('path', { 'data-c': id, stroke: laneColor(id), d: `M${origin} ${start - 12} Q${x(id)} ${start - 12} ${x(id)} ${start + 6} L${x(id)} ${end}` });
-      for (const node of nodes) {
-        shape('path', { 'data-c': id, stroke: laneColor(id), opacity: '.3', d: `M${x(id)} ${y(node)} L${gut - 5} ${y(node)}` });
-        shape('circle', { 'data-c': id, cx: x(id), cy: y(node), r: 4, fill: laneColor(id) });
-      }
-    }
-    for (const reply of replies) {
-      const from = entries.get(reply.from), to = entries.get(reply.to), a = x(from.dataset.c), b = x(to.dataset.c);
-      shape('path', { class: 'reply-arc', 'data-c': to.dataset.c, stroke: 'var(--soft)', opacity: '.35', d: `M${a} ${y(from)} C${Math.max(a, b) + 12} ${y(from)} ${Math.max(a, b) + 12} ${y(to)} ${b} ${y(to)}` });
-    }
-    applyHover();
-  };
-  riverResize?.disconnect(); riverResize = new ResizeObserver(draw); riverResize.observe(river);
-  draw(); document.fonts?.ready.then(draw);
+  // The graph stays last and is never moved. Reconcile in place: stale nodes first, so survivors keep their positions.
+  const nodes = top ? [...feed, ...oldEnd.reverse(), endcap] : [...oldEnd, ...feed, endcap];
+  const wanted = new Set(nodes);
+  for (const [nodeKey, hit] of riverNodes) if (!wanted.has(hit.node)) { hit.node.remove(); riverNodes.delete(nodeKey); }
+  let cursor = river.firstChild;
+  for (const node of nodes) { if (node === cursor) cursor = cursor.nextSibling; else river.insertBefore(node, cursor); }
+  if (river.parentNode !== scroll) scroll.replaceChildren(river);
+  Object.assign(graph, { list, laneIds, convs, convOf, replies, labels, entries, gut, x, arrivals });
+  draw(); document.fonts?.ready.then(() => { if (river.isConnected) draw(); });
   if (changed) {
     const firstUnread = river.querySelector('.entry.unread');
-    scroll.scrollTop = firstUnread ? firstUnread.offsetTop - 8 : scroll.scrollHeight;
-  } else scroll.scrollTop = keep;
-  ui.feedKey = key;
-  if (!changed && focusedId) entries.get(focusedId)?.focus({ preventScroll: true });
-}
-function applyHover() {
-  for (const node of document.querySelectorAll('.river .entry, .river .conv')) node.classList.toggle('dim', !!ui.hover && node.dataset.c !== ui.hover);
-  for (const node of document.querySelectorAll('.graph [data-c]')) node.style.opacity = ui.hover && node.dataset.c !== ui.hover ? '.12' : '';
+    scroll.scrollTop = top ? 0 : firstUnread ? firstUnread.offsetTop - 8 : scroll.scrollHeight;
+    settleFollow(); ui.newestShown = newest;
+  } else { syncFollow(); ui.newestShown = Math.max(ui.newestShown, newest); }
+  if (focusedId && document.activeElement === document.body) entries.get(focusedId)?.focus({ preventScroll: true });
 }
 function render() {
   if (S.theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme;
-  $('#theme').value = S.theme; $('#retention').value = String(S.retentionDays);
-  // Re-renders replace nodes; keep keyboard focus on the same control (by id) so live updates don't drop it.
-  const focusedId = document.activeElement?.id;
+  $('#theme').value = S.theme; $('#retention').value = String(S.retentionDays); $('#direction').value = S.direction;
   renderSide(); renderRiver();
-  if (focusedId && !document.activeElement?.id) document.getElementById(focusedId)?.focus({ preventScroll: true });
 }
 // A visible bottom must remain in view for a full second. Unseen predecessors block advancement.
 let savingRead = false;
@@ -310,14 +414,16 @@ async function sampleReading() {
     } else ui.visibleSince.delete(id);
   }
   for (const id of ui.visibleSince.keys()) if (!present.has(id)) ui.visibleSince.delete(id);
-  const next = readHighWater(S.msgs.filter((m) => inCollection(c, m)), c.readAt ?? 0, ui.seen);
+  // A filter hides unread messages, so only the whole feed at its newest edge may settle them unseen.
+  const settles = S.direction === 'top' && ui.follow && !ui.src && !ui.conv && !ui.q;
+  const next = (settles ? readThrough : readHighWater)(S.msgs.filter((m) => inCollection(c, m)), c.readAt ?? 0, ui.seen);
   if (next > (c.readAt ?? 0)) {
     c.readAt = next; savingRead = true;
     try { await saveCollections(); } finally { savingRead = false; }
   }
 }
 setInterval(() => sampleReading().catch(reportError), 100);
-$('#scroll').addEventListener('scroll', () => sampleReading().catch(reportError), { passive: true });
+$('#scroll').addEventListener('scroll', () => { trackFollow(); sampleReading().catch(reportError); }, { passive: true });
 document.addEventListener('visibilitychange', () => ui.visibleSince.clear());
 const listenableChans = () => Object.values(S.chans).filter((c) => c.guild_id && !NOT_LISTENABLE.includes(c.type));
 const channelIdsOf = (predicate) => listenableChans().filter(predicate).map((c) => c.id);
@@ -414,7 +520,7 @@ function newCollection() {
 async function markRead() {
   const c = collection(); if (!c) return;
   c.readAt = Math.max(c.readAt ?? 0, Date.now(), ...S.msgs.map((m) => Date.parse(m.timestamp)).filter(Number.isFinite));
-  ui.openReadAt = c.readAt; ui.expanded = false; await saveCollections(); toast(t('readHere'));
+  ui.openReadAt = displayBoundary(feedMessages(c), c.readAt); ui.expanded = false; await saveCollections(); toast(t('readHere'));
 }
 async function click(event) {
   const menu = $('#menu');
@@ -424,8 +530,9 @@ async function click(event) {
   if (b.id === 'menubtn' || b.id === 'mobilemenu') { menu.hidden = !menu.hidden; $('#menubtn').setAttribute('aria-expanded', String(!menu.hidden)); }
   else if (b.dataset.collection) { ui.collection = b.dataset.collection; ui.src = ui.conv = ui.q = ''; ui.feedKey = null; await refresh(true); }
   else if (b.dataset.src) { ui.src = ui.src === b.dataset.src ? '' : b.dataset.src; ui.conv = ''; render(); }
-  else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; ui.hover = null; renderRiver(); }
+  else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; renderRiver(); }
   else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
+  else if (b.dataset.gap) showRecovery(S.events.find((event) => event.type === 'gap' && String(event.from) === b.dataset.gap));
   else if (b.id === 'markread') await markRead();
   else if (b.id === 'themebtn') await store.set({ theme: isDark() ? 'light' : 'dark' });
   else if (b.id === 'edit' || b.id === 'emptyedit') openEdit(false);
@@ -462,6 +569,7 @@ document.addEventListener('input', (event) => {
 document.addEventListener('change', (event) => {
   if (event.target.id === 'theme') store.set({ theme: event.target.value }).catch(reportError);
   if (event.target.id === 'retention') store.set({ retentionDays: Number(event.target.value) }).catch(reportError);
+  if (event.target.id === 'direction') store.set({ readingDirection: event.target.value }).catch(reportError);
 });
 document.addEventListener('keydown', (event) => {
   const dialog = $('#scrim [role="dialog"], #overlay [role="dialog"]');
@@ -491,13 +599,12 @@ document.addEventListener('keydown', (event) => {
   }
 });
 document.addEventListener('mousedown', (event) => { if (event.target.id === 'scrim') cancelSheet().catch(reportError); });
-document.addEventListener('mouseover', (event) => { const id = event.target.closest('.river [data-c]')?.dataset.c ?? null; if (id !== ui.hover) { ui.hover = id; applyHover(); } });
 const command = async (kind) => { const result = await api.runtime.sendMessage({ kind }); if (result?.error) throw new Error(result.error); await refresh(true); };
 let refreshing = Promise.resolve();
 const refresh = (force = false) => {
   refreshing = refreshing.then(async () => { if (await load(force)) render(); }).catch(reportError); return refreshing;
 };
-store.onChanged.addListener((changes) => { if (['rev', 'collections', 'theme', 'health', 'consentedAt', 'retentionDays'].some((key) => key in changes)) refresh(); });
+store.onChanged.addListener((changes) => { if (['rev', 'collections', 'theme', 'health', 'consentedAt', 'retentionDays', 'readingDirection'].some((key) => key in changes)) refresh(); });
 setInterval(renderStatus, 30e3);
 for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
 for (const attr of ['title', 'aria-label']) for (const node of document.querySelectorAll(`[data-i18n-${attr}]`)) node.setAttribute(attr, t(node.getAttribute(`data-i18n-${attr}`)));

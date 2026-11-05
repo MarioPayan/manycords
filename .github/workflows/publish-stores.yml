@@ -1,0 +1,67 @@
+# Sends a release's own zips to both stores for review. Mark a release as a pre-release to keep it off the stores.
+# Secrets and setup: README, "Publishing to the stores".
+name: Publish to stores
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.2.0
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  chrome:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    env:
+      EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+      PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+      CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+      REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+    steps:
+      - name: Download the release zip and check its version
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'discord-feed-chrome-*.zip' --output extension.zip
+          version="$(unzip -p extension.zip manifest.json | jq -r .version)"
+          [ "v$version" = "$TAG" ] || { echo "::error::The zip has version $version but the release is $TAG"; exit 1; }
+          echo "Zip version $version matches $TAG"
+      - name: Check credentials
+        run: |
+          missing=""
+          for name in EXTENSION_ID PUBLISHER_ID CLIENT_ID CLIENT_SECRET REFRESH_TOKEN; do [ -n "${!name}" ] || missing="$missing $name"; done
+          [ -z "$missing" ] || { echo "::error::Missing Chrome Web Store secrets (CWS_ prefix):$missing"; exit 1; }
+      - name: Upload and submit for review
+        run: npx --yes chrome-webstore-upload-cli@4.0.2 --source extension.zip
+
+  firefox:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    env:
+      WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+      WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - name: Download the release zip and check its version
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'discord-feed-firefox-*.zip' --output extension.zip
+          unzip -q extension.zip -d extension
+          version="$(jq -r .version extension/manifest.json)"
+          [ "v$version" = "$TAG" ] || { echo "::error::The zip has version $version but the release is $TAG"; exit 1; }
+          echo "Zip version $version matches $TAG"
+      - name: Check credentials
+        run: |
+          missing=""
+          for name in WEB_EXT_API_KEY WEB_EXT_API_SECRET; do [ -n "${!name}" ] || missing="$missing $name"; done
+          [ -z "$missing" ] || { echo "::error::Missing Firefox secrets (AMO_JWT_ISSUER, AMO_JWT_SECRET):$missing"; exit 1; }
+      # A listed version waits for Mozilla's review, so the job ends once the upload is accepted.
+      - name: Upload and submit for review
+        run: npx --yes web-ext@10.8.0 sign --source-dir extension --artifacts-dir signed --channel listed --approval-timeout 0

@@ -328,7 +328,7 @@
     "message": "deleted in Discord"
   },
   "feedEndTop": {
-    "message": "You’re up to date. New messages will appear here."
+    "message": "You’re up to date. New messages will appear at the top."
   },
   "newArrive": {
     "message": "New messages arrive"

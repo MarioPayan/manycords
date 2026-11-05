@@ -288,7 +288,7 @@ const sections = {
     assert.equal(await page.locator('#direction option').first().getAttribute('value'), 'top', 'the default is listed first');
     assert.deepEqual(await entryIds(page), newestFirst, 'a fresh profile opens newest first');
     assert.equal(await page.locator('#scroll').evaluate((s) => s.scrollTop), 0, 'a fresh profile opens at the top');
-    assert.match(await page.evaluate(() => document.querySelector('.river').firstElementChild.className), /endcap/, 'a fresh profile starts at the up-to-date line');
+    assert.equal(await page.evaluate(() => [...document.querySelector('.river').children].at(-2).className.trim()), 'endcap', 'top: the up-to-date line closes the feed, so it never sits above unread messages');
     await page.evaluate(() => browser.storage.local.set({ readingDirection: 'sideways' }));
     await settle(page);
     assert.equal(await page.inputValue('#direction'), 'top', 'an unknown value means top');
@@ -312,9 +312,9 @@ const sections = {
     assert.equal(await page.locator('#scroll').evaluate((s) => s.scrollTop), 0, 'switching opens at the top');
     const structure = await page.evaluate(() => {
       const kids = [...document.querySelector('.river').children], last = kids.findLastIndex((node) => node.matches('.entry'));
-      return { first: kids[0].className.trim(), cap: kids[0].textContent, earlierAfterEntries: kids.findIndex((node) => node.matches('.earlier')) > last, firstEntry: kids.findIndex((node) => node.matches('.entry')), positions: [...document.querySelectorAll('.entry')].map((node) => [node.getAttribute('aria-posinset'), node.getAttribute('aria-setsize')].join('/')) };
+      return { closing: kids.at(-2).className.trim(), cap: kids.at(-2).textContent, earlierAfterEntries: kids.findIndex((node) => node.matches('.earlier')) > last, firstEntry: kids.findIndex((node) => node.matches('.entry')), positions: [...document.querySelectorAll('.entry')].map((node) => [node.getAttribute('aria-posinset'), node.getAttribute('aria-setsize')].join('/')) };
     });
-    assert.equal(structure.first, 'endcap top');
+    assert.equal(structure.closing, 'endcap');
     assert.match(structure.cap, new RegExp(await page.evaluate(() => browser.i18n.getMessage('feedEndTop').slice(4, 20))));
     assert.equal(structure.earlierAfterEntries, true, 'the earlier button sits at the old end');
     assert.deepEqual(structure.positions, bottomOrder.map((_, i) => `${i + 1}/8`), 'positions follow display order');

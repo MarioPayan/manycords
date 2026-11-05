@@ -356,7 +356,7 @@ function renderRiver() {
   const earlierCount = !ui.src && !ui.conv && !ui.q ? Math.max(order.earlier.length, (S.stats[c.id]?.total ?? S.msgs.length) - order.unread.length) : order.earlier.length;
   if (earlierCount && order.unread.length) oldEnd.push(keyed('earlier', JSON.stringify([earlierCount, ui.expanded]), () => button(t('earlierRead', [earlierCount]), { class: 'textbtn earlier', 'aria-expanded': String(ui.expanded), onclick: () => toggleEarlier().catch(reportError) })));
   if ((S.stats[c.id]?.total ?? 0) > S.msgs.length) { const text = t('recentLimit', [S.msgs.length, S.stats[c.id].total]); oldEnd.push(keyed('more', text, () => el('div', { class: 'more' }, text))); }
-  const endcap = keyed('endcap', S.direction, () => el('div', { class: `endcap ${top ? 'top' : ''}` }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '\u2713'), t(top ? 'feedEndTop' : 'feedEnd')));
+  const endcap = keyed('endcap', S.direction, () => el('div', { class: 'endcap' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '\u2713'), t(top ? 'feedEndTop' : 'feedEnd')));
   const byId = new Map(S.msgs.map((m) => [m.id, m]));
   const today = new Date().toDateString(), yesterday = new Date(Date.now() - 864e5).toDateString();
   const feed = [], labels = new Map(), entries = new Map(), arrivals = new Set();
@@ -379,7 +379,7 @@ function renderRiver() {
     entries.set(m.id, entry); feed.push(entry); newest = Math.max(newest, time);
   });
   // The graph stays last and is never moved. Reconcile in place: stale nodes first, so survivors keep their positions.
-  const nodes = top ? [endcap, ...feed, ...oldEnd.reverse()] : [...oldEnd, ...feed, endcap];
+  const nodes = top ? [...feed, ...oldEnd.reverse(), endcap] : [...oldEnd, ...feed, endcap];
   const wanted = new Set(nodes);
   for (const [nodeKey, hit] of riverNodes) if (!wanted.has(hit.node)) { hit.node.remove(); riverNodes.delete(nodeKey); }
   let cursor = river.firstChild;

@@ -210,14 +210,69 @@ function attachment(file) {
   } });
   return link(image, file.url, { class: 'image-attachment' });
 }
+// Embed media load only from Discord's own image proxies, at a size whose box is reserved before it arrives.
+const EMBED_HOSTS = ['media.discordapp.net', 'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net', 'cdn.discordapp.com'];
+function embedImage(media, maxWidth, maxHeight, cls, alt = '') {
+  let src;
+  try { src = new URL(media?.proxy_url); } catch { return null; }
+  if (src.protocol !== 'https:' || !EMBED_HOSTS.includes(src.hostname)) return null;
+  const fit = media.width > 0 && media.height > 0 ? Math.min(1, maxWidth / media.width, maxHeight / media.height) : 0;
+  if (fit) { src.searchParams.set('width', String(Math.round(media.width * fit))); src.searchParams.set('height', String(Math.round(media.height * fit))); }
+  if (failedImages.has(src.href)) return null;
+  return el('img', { src: src.href, alt, loading: 'lazy', class: cls, style: fit ? { width: `${Math.round(media.width * fit)}px`, aspectRatio: `${media.width} / ${media.height}` } : undefined,
+    onerror: (event) => { failedImages.add(event.target.src); event.target.remove(); } });
+}
+// Discord draws nothing for a bare link already in the text.
+const embedShown = (e, content) => e && typeof e === 'object' && (e.title || e.description || e.image || e.thumbnail || e.video || e.fields?.length || e.author || (e.url && !String(content ?? '').includes(e.url)));
+function embedNode(e) {
+  const color = Number.isInteger(e.color) && e.color >= 0 && e.color <= 0xffffff ? `#${e.color.toString(16).padStart(6, '0')}` : null;
+  const still = e.type === 'gifv' || e.type === 'image';
+  const big = e.image ? embedImage(e.image, 400, 300, 'em-img', e.title ?? '') : still ? embedImage(e.thumbnail, 400, 300, 'em-img', e.title ?? '') : null;
+  let video = null;
+  if (!still && e.video) {
+    const frame = embedImage(e.thumbnail, 400, 300, 'em-img', '');
+    video = link([frame, el('span', { class: 'em-play', 'aria-hidden': 'true' }, '\u25b6'), frame ? null : el('span', {}, t('openVideo'))], e.video.url ?? e.url, { class: `em-video ${frame ? '' : 'bare'}`, 'aria-label': t('openVideo'), title: e.title ?? t('openVideo') });
+  }
+  const thumb = !big && !video && e.thumbnail ? embedImage(e.thumbnail, 80, 80, 'em-thumb') : null;
+  const main = el('div', { class: 'em-main' },
+    e.provider?.name ? el('div', { class: 'em-small' }, e.provider.name) : null,
+    e.author?.name ? el('div', { class: 'em-author' }, link(e.author.name, e.author.url)) : null,
+    e.title ? el('div', { class: 'em-title' }, link(e.title, e.url)) : null,
+    e.description ? el('div', { class: 'em-desc' }, richNodes(markdownTokens(e.description))) : null,
+    e.fields?.length ? el('div', { class: 'em-fields' }, e.fields.map((f) => el('div', { class: `em-field ${f.inline ? 'inline' : ''}` }, el('b', {}, f.name ?? ''), el('div', {}, richNodes(markdownTokens(f.value ?? '')))))) : null,
+    !e.title && !e.description && e.url && !big && !video ? el('div', { class: 'em-title' }, link(e.url, e.url)) : null);
+  return el('div', { class: 'embed', style: color ? { '--ec': color } : undefined }, main, thumb, big ?? video, e.footer?.text ? el('div', { class: 'em-small em-foot' }, e.footer.text) : null);
+}
+// One plain line of the original: spoilers stay covered, mentions and channels resolve like the message text.
+function quoteText(reply) {
+  const line = String(reply.content ?? '').split('\n').find((part) => part.trim()) ?? '';
+  const box = el('span', {}, richNodes(markdownTokens(line)));
+  for (const node of box.querySelectorAll('.spoiler')) node.replaceWith('\u2591\u2591\u2591');
+  return box.textContent.trim() || (reply.attachments?.length ? reply.attachments[0].filename ?? t('fileType') : Array.isArray(reply.embeds) && reply.embeds[0]?.title || t('noText'));
+}
+function replyQuote(m, reply) {
+  if (!m.reply_to) return null;
+  if (!reply) return el('div', { class: 'quote missing' }, el('span', { 'aria-hidden': 'true' }, '\u21b3'), m.reply_author ? el('b', {}, m.reply_author) : null, el('span', { class: 'q-text' }, t('replyNotLoaded')));
+  const text = quoteText(reply), name = reply.author?.name ?? '?';
+  return button([el('span', { 'aria-hidden': 'true' }, '\u21b3'), el('b', {}, name), el('span', { class: 'q-text' }, text)], { class: 'quote', 'data-jump': reply.id, title: `${name}: ${text}`, 'aria-label': t('replyTo', [name, text]) });
+}
+function jumpTo(id) {
+  const node = riverNodes.get(`m:${id}`)?.node;
+  if (!node?.isConnected) { toast(t('replyHidden')); return; }
+  node.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  node.focus({ preventScroll: true });
+  node.classList.add('flash'); clearTimeout(node.flashTimer);
+  node.flashTimer = setTimeout(() => node.classList.remove('flash'), 1600);
+}
 function messageNode(m, reply) {
   const href = `https://discord.com/channels/${encodeURIComponent(m.guild_id)}/${encodeURIComponent(m.channel_id)}/${encodeURIComponent(m.id)}`;
   const header = el('div', { class: 'h' }, el('span', { class: 'who' }, m.author?.name ?? '?'), el('time', { class: 't', title: fmtFull(m.timestamp), datetime: m.timestamp }, hm(m.timestamp)), link([fav(m.guild_id), `#${chanName(m.channel_id)}`], href, { class: 'where', title: t('openInDiscord') }));
-  if (m.reply_to) header.append(el('span', { class: 're' }, `\u21b3 ${reply?.author?.name ?? t('reply')}`));
   if (m.edited_timestamp) header.append(el('span', { class: 'tag' }, t('edited')));
   if (m.deleted_at) header.append(el('span', { class: 'tag' }, t('deleted')));
-  const body = el('div', {}, header, el('div', { class: 'txt' }, richNodes(markdownTokens(m.content))));
-  const extras = [...(m.stickers ?? []).map((s) => t('stickerLabel', [s])), m.embeds ? t('embedCount', [m.embeds]) : ''].filter(Boolean);
+  const body = el('div', {}, replyQuote(m, reply), header, el('div', { class: 'txt' }, richNodes(markdownTokens(m.content))));
+  // Rows captured before embed cards hold only a count.
+  const extras = [...(m.stickers ?? []).map((s) => t('stickerLabel', [s])), typeof m.embeds === 'number' && m.embeds ? t('embedCount', [m.embeds]) : ''].filter(Boolean);
+  if (Array.isArray(m.embeds)) body.append(...m.embeds.filter((e) => embedShown(e, m.content)).map(embedNode));
   if (extras.length) body.append(el('div', { class: 'tag' }, extras.join(' \u00b7 ')));
   body.append(...(m.attachments ?? []).map(attachment));
   return el('article', { class: `entry ${m.deleted_at ? 'deleted' : ''}`, tabindex: '0', 'data-id': m.id }, avatar(m.author, m.guild_id), body,
@@ -238,7 +293,7 @@ function keyed(key, signature, build) {
 function messageSignature(m, reply) {
   const refs = String(m.content ?? '').match(/<(?:#|@!?)\d+>/g)?.map((ref) => ref[1] === '#' ? chanName(ref.slice(2, -1)) : S.people.get(ref.replace(/\D/g, '')));
   return JSON.stringify([m.author, m.timestamp, m.content, m.channel_id, m.guild_id, m.reply_to, m.edited_timestamp, m.deleted_at, m.stickers, m.embeds, m.attachments,
-    chanName(m.channel_id), guildName(m.guild_id), S.icons[m.guild_id], reply?.author?.name, refs]);
+    chanName(m.channel_id), guildName(m.guild_id), S.icons[m.guild_id], reply?.author?.name, refs, m.reply_author, reply && quoteText(reply)]);
 }
 function mountRiver() {
   if (river) return;
@@ -551,6 +606,7 @@ async function click(event) {
   if (b.id === 'menubtn' || b.id === 'mobilemenu') { menu.hidden = !menu.hidden; $('#menubtn').setAttribute('aria-expanded', String(!menu.hidden)); }
   else if (b.dataset.collection) { ui.collection = b.dataset.collection; ui.src = ui.conv = ui.q = ''; ui.feedKey = null; await refresh(true); }
   else if (b.dataset.src) { ui.src = ui.src === b.dataset.src ? '' : b.dataset.src; ui.conv = ''; render(); }
+  else if (b.dataset.jump) jumpTo(b.dataset.jump);
   else if (b.dataset.focus) { ui.conv = ui.conv === b.dataset.focus ? '' : b.dataset.focus; ui.hover = null; renderRiver(); }
   else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
   else if (b.id === 'status-toggle') { ui.statusOpen = !ui.statusOpen; renderStatus(); }

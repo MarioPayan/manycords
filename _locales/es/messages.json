@@ -316,6 +316,26 @@
   "reply": {
     "message": "respuesta"
   },
+  "replyTo": {
+    "message": "Respuesta a $NAME$: $TEXT$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      },
+      "text": {
+        "content": "$2"
+      }
+    }
+  },
+  "replyNotLoaded": {
+    "message": "mensaje original no cargado"
+  },
+  "replyHidden": {
+    "message": "El mensaje original no se muestra en esta vista"
+  },
+  "openVideo": {
+    "message": "Abrir video"
+  },
   "edited": {
     "message": "editado"
   },

@@ -123,6 +123,94 @@ const sections = {
     assert.equal(await page.evaluate(() => window.fallbackNode.isConnected), true, 'the fallback is not re-created');
     assert.equal(await page.locator('.entry[data-id="broken"] img.av').count(), 0);
   },
+  async 'embeds render as cards that load images only from Discord proxies'(page) {
+    const DISCORD = ['cdn.discordapp.com', 'media.discordapp.net', 'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net'];
+    const requested = [];
+    page.on('request', (request) => requested.push(request.url()));
+    for (const host of DISCORD.slice(1)) await page.route(`https://${host}/**`, (route) => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"/>' }));
+    await page.route(/evil\.example/, (route) => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"/>' }));
+    await arrive(page, 'old-embeds', { content: 'Old row', embeds: 2 });
+    await arrive(page, 'bare-link', { content: 'https://example.org/bare', embeds: [{ type: 'link', url: 'https://example.org/bare' }] });
+    await arrive(page, 'video', { content: 'Clip', embeds: [{ type: 'video', url: 'https://www.youtube.com/watch?v=x', title: 'Trailer', provider: { name: 'YouTube' },
+      thumbnail: { proxy_url: 'https://images-ext-2.discordapp.net/external/v/https/i.ytimg.com/vi/x/hq.jpg', width: 480, height: 360 }, video: { url: 'https://www.youtube.com/embed/x', width: 1280, height: 720 } }] });
+    // Stored rows are not trusted either: the reader checks hosts again.
+    await arrive(page, 'offhost', { content: 'Cat', embeds: [{ type: 'rich', title: 'Cat', image: { proxy_url: 'https://evil.example/cat.png', width: 100, height: 100 },
+      thumbnail: { proxy_url: 'https://media.discordapp.net.evil.example/cat.png', width: 50, height: 50 } }] });
+    await arrive(page, 'rich', { content: 'Read https://example.org/post', embeds: [{ type: 'rich', url: 'https://example.org/post', title: 'A post', description: 'Some **bold** text', color: 0x5865f2,
+      author: { name: 'Example', url: 'https://example.org/me' }, provider: { name: 'Example Site' }, footer: { text: 'Footer' },
+      fields: [{ name: 'Inline A', value: '1', inline: true }, { name: 'Inline B', value: '2', inline: true }, { name: 'Wide', value: '3' }],
+      image: { proxy_url: 'https://images-ext-1.discordapp.net/external/abc/https/example.org/full.png', width: 1200, height: 600 } }] });
+    await page.locator('.entry[data-id="rich"] .embed img').waitFor();
+    const rich = page.locator('.entry[data-id="rich"] .embed');
+    const lineColor = await page.evaluate(() => { const node = document.createElement('i'); node.style.color = 'var(--line)'; document.body.append(node); const value = getComputedStyle(node).color; node.remove(); return value; });
+    assert.equal(await rich.evaluate((node) => getComputedStyle(node).borderLeftColor), 'rgb(88, 101, 242)', 'the card rule uses the embed colour');
+    assert.equal(await page.locator('.entry[data-id="offhost"] .embed').evaluate((node) => getComputedStyle(node).borderLeftColor), lineColor, 'no colour falls back to the line token');
+    const title = rich.locator('.em-title a');
+    assert.deepEqual([await title.textContent(), await title.getAttribute('href'), await title.getAttribute('target'), await title.getAttribute('rel')], ['A post', 'https://example.org/post', '_blank', 'noopener noreferrer']);
+    assert.equal(await rich.locator('.em-desc strong').textContent(), 'bold', 'the description uses message formatting');
+    assert.equal(await rich.locator('.em-field.inline').count(), 2);
+    assert.equal(await rich.locator('.em-small').first().textContent(), 'Example Site');
+    assert.equal(await rich.locator('.em-foot').textContent(), 'Footer');
+    const image = await rich.locator('img.em-img').evaluate((node) => ({ host: new URL(node.src).hostname, size: [node.offsetWidth, node.offsetHeight] }));
+    assert.deepEqual(image, { host: 'images-ext-1.discordapp.net', size: [400, 200] }, 'the image box is reserved from the embed size, at most 400 px wide');
+    assert.equal(await page.locator('.entry[data-id="offhost"] .em-title').textContent(), 'Cat', 'an off-host embed still shows its text');
+    assert.equal(await page.locator('.entry[data-id="offhost"] img').count(), 1, 'an off-host embed shows no image, only the avatar');
+    const video = page.locator('.entry[data-id="video"] .embed a.em-video');
+    assert.deepEqual([await video.getAttribute('href'), await video.getAttribute('rel'), await video.locator('img').count(), await video.locator('.em-play').count()], ['https://www.youtube.com/embed/x', 'noopener noreferrer', 1, 1], 'a video is a still frame linking out');
+    assert.equal(await page.locator('iframe, video, audio, embed, object').count(), 0, 'no player elements');
+    assert.equal(await page.locator('.entry[data-id="bare-link"] .embed').count(), 0, 'a bare link already in the text shows no card');
+    assert.equal(await page.locator('.entry[data-id="old-embeds"] .tag').textContent(), await page.evaluate(() => browser.i18n.getMessage('embedCount', ['2'])), 'a numeric row keeps its count label');
+    await settle(page);
+    const sources = await page.$$eval('img', (nodes) => nodes.map((node) => node.src));
+    for (const src of sources) assert.ok(DISCORD.includes(new URL(src).hostname), `image source outside Discord: ${src}`);
+    assert.deepEqual(requested.filter((url) => /evil\.example|example\.org|ytimg|youtube/.test(new URL(url).hostname)), [], 'no third-party image is requested');
+    // An update re-renders only that message: the other cards keep their image nodes.
+    await page.locator('.entry[data-id="video"] img.em-img').evaluate((node) => { window.videoFrame = node; });
+    await page.evaluate(async () => {
+      const row = await feedDB.get('messages', 'rich');
+      await feedDB.writeMessage({ ...row, embeds: [{ ...row.embeds[0], title: 'A better post' }] });
+      const { rev } = await browser.storage.local.get('rev'); await browser.storage.local.set({ rev: rev + 1 });
+    });
+    await page.waitForFunction(() => document.querySelector('.entry[data-id="rich"] .em-title')?.textContent === 'A better post');
+    assert.equal(await page.evaluate(() => window.videoFrame.isConnected), true, 'an unrelated card is not rebuilt');
+  },
+  async 'a reply quotes its original and jumps to it'(page) {
+    await page.setViewportSize({ width: 1360, height: 420 });
+    await arrive(page, 'orig', { author: { id: '9', name: 'Ola' }, content: 'First line of the **original** ||spoiler||\nsecond line' });
+    for (let i = 0; i < 12; i++) await arrive(page, `filler${i}`);
+    await arrive(page, 'rep', { content: 'Agreed', reply_to: 'orig' });
+    await arrive(page, 'lost', { content: 'Who?', reply_to: 'nope', reply_author: 'Ghost' });
+    const quote = page.locator('.entry[data-id="rep"] button.quote');
+    await quote.waitFor();
+    await page.waitForFunction(() => !document.querySelector('.arrive, .pop') && document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.target?.classList?.contains('pulse')));
+    await settle(page);
+    assert.equal((await quote.locator('.q-text').textContent()), 'First line of the original ░░░', 'first line, formatting flattened, spoiler covered');
+    assert.equal(await quote.locator('b').textContent(), 'Ola');
+    assert.equal(await quote.evaluate((node) => getComputedStyle(node.querySelector('.q-text')).textOverflow), 'ellipsis');
+    assert.equal(await quote.evaluate((node) => node.getBoundingClientRect().height < 24), true, 'one line');
+    assert.equal(await page.locator('.entry[data-id="rep"] .re').count(), 0, 'the quote replaces the header reply marker');
+    const inView = (id) => page.locator(`.entry[data-id="${id}"]`).evaluate((node) => { const box = node.getBoundingClientRect(), scroll = document.querySelector('#scroll').getBoundingClientRect(); return box.top >= scroll.top && box.bottom <= scroll.bottom; });
+    assert.equal(await inView('orig'), false, 'the original starts off screen');
+    await quote.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => { const node = document.querySelector('.entry[data-id="orig"]'), box = node.getBoundingClientRect(), scroll = document.querySelector('#scroll').getBoundingClientRect(); return box.top >= scroll.top && box.bottom <= scroll.bottom; });
+    assert.equal(await page.locator('.entry[data-id="orig"]').evaluate((node) => node.classList.contains('flash')), true, 'the original is highlighted');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), 'orig', 'focus moves to the original');
+    await page.waitForFunction(() => !document.querySelector('.entry.flash'), null, { timeout: 3000 });
+    const missing = page.locator('.entry[data-id="lost"] .quote');
+    assert.equal(await missing.evaluate((node) => node.tagName), 'DIV', 'an unloaded original is not clickable');
+    assert.match(await missing.textContent(), new RegExp(`Ghost.*${await page.evaluate(() => browser.i18n.getMessage('replyNotLoaded'))}`));
+    // m7 replies to m3, which is loaded but collapsed among earlier read messages.
+    await page.locator('.entry[data-id="m7"] button.quote').click();
+    assert.equal(await page.locator('.toast').textContent(), await page.evaluate(() => browser.i18n.getMessage('replyHidden')), 'a collapsed original explains why nothing moved');
+    // Editing the original updates the quote.
+    await page.evaluate(async () => {
+      const row = await feedDB.get('messages', 'orig');
+      await feedDB.writeMessage({ ...row, content: 'Edited original', edited_timestamp: new Date().toISOString() });
+      const { rev } = await browser.storage.local.get('rev'); await browser.storage.local.set({ rev: rev + 1 });
+    });
+    await page.waitForFunction(() => document.querySelector('.entry[data-id="rep"] .q-text')?.textContent === 'Edited original');
+  },
   async 'status strip expands in place and colours its dot by capture health'(page) {
     const message = (key) => page.evaluate((key) => browser.i18n.getMessage(key), key);
     // Computed colours, compared with the tokens resolved on a probe element.

@@ -225,6 +225,34 @@
     .image-attachment { display: block; margin-top: 8px; max-width: 100%; }
     .image-attachment img { max-width: min(320px, 100%); }
     .file { color: var(--ink); text-decoration: none; }
+    /* Reply quote: one faint line above the header, like Discord. */
+    .entry .quote { display: flex; align-items: baseline; gap: 6px; max-width: 100%; min-width: 0; margin-bottom: 1px; font-size: 12px; color: var(--faint); text-align: left; white-space: nowrap; overflow: hidden; }
+    .entry .quote b { font-weight: 600; color: var(--soft); flex: none; }
+    .entry .quote .q-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .entry button.quote:hover, .entry button.quote:hover b { color: var(--ink); }
+    .entry .quote.missing .q-text { font-style: italic; }
+    .entry.flash { background: color-mix(in srgb, var(--signal) 14%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--signal) 45%, transparent); }
+    /* Embed cards: left rule in the embed colour; images reserve their box like attachment thumbnails. */
+    .embed { margin-top: 6px; width: fit-content; max-width: min(432px, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 10px 12px; border-radius: 4px 10px 10px 4px; border-left: 4px solid var(--ec, var(--line)); background: var(--sunk); font-size: 13px; }
+    .embed .em-main { display: grid; gap: 4px; min-width: 0; align-content: start; }
+    .embed .em-small { font-size: 12px; color: var(--faint); }
+    .embed .em-author { font-weight: 600; }
+    .embed .em-author a { color: var(--ink); }
+    .embed .em-title { font-weight: 600; overflow-wrap: anywhere; }
+    .embed a { color: var(--signal); }
+    .embed .em-desc { color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .embed .em-desc code, .embed .em-field code { font-family: var(--mono); }
+    .embed .em-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; }
+    .embed .em-field { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; color: var(--soft); }
+    .embed .em-field.inline { grid-column: auto; }
+    .embed .em-field b { display: block; font-size: 12px; color: var(--ink); }
+    .embed .em-thumb { grid-column: 2; grid-row: 1; max-width: 80px; max-height: 80px; border-radius: 6px; object-fit: contain; }
+    .embed .em-img, .embed .em-video, .embed .em-foot { grid-column: 1 / -1; }
+    .embed .em-img { display: block; max-width: 100%; height: auto; border-radius: 6px; }
+    .embed .em-video { position: relative; display: block; width: fit-content; max-width: 100%; }
+    .embed .em-play { position: absolute; inset: 0; margin: auto; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.6); color: #fff; font-size: 16px; }
+    .embed .em-video.bare { display: inline-flex; align-items: center; gap: 8px; }
+    .embed .em-video.bare .em-play { position: static; width: 28px; height: 28px; font-size: 11px; }
     .health-copy { font-size: 12px; margin: 0; color: var(--soft); }
     .covered { color: var(--ok); }
     .spark i.covered { background: var(--ok); }

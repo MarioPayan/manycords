@@ -168,6 +168,24 @@ const feedDB = (() => {
         cursor.continue();
       };
     }),
+    // Unread everywhere: newer than the readAt of every collection that contains the channel. Bodies of read
+    // messages and of channels outside all collections are never loaded.
+    unread: (collections, channels) => transaction(['messages'], 'readonly', (tx, done) => {
+      const result = [], messages = tx.objectStore('messages');
+      done(result);
+      const request = messages.index('channel_id').openKeyCursor(null, 'nextunique');
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const channel = cursor.key, holders = collections.filter((c) => contains(c, { channel_id: channel }, channels));
+        if (holders.length) {
+          const from = Math.max(...holders.map((c) => c.readAt ?? 0));
+          messages.index('channel_time').getAll(IDBKeyRange.bound([channel, from], [channel, Number.MAX_VALUE], true, false))
+            .onsuccess = (event) => result.push(...event.target.result);
+        }
+        cursor.continue();
+      };
+    }),
     outside: (collections, channels, remove = false) => transaction(['messages'], remove ? 'readwrite' : 'readonly', (tx, done) => {
       let count = 0;
       done(0);

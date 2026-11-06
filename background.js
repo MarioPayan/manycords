@@ -8,7 +8,9 @@
 // captureSession persists leader/tab telemetry across MV3 worker suspension; it holds
 // no message bodies. lastSignal remains the last accepted leader gateway observation.
 // Gap events are { type: 'gap', at, from, to, covered: { [channelId]: true } }.
-if (typeof importScripts === 'function') importScripts('db.js', 'gaps.js');
+// selfId is the user's own Discord id from READY (nothing else from READY is kept). keywords (string[]),
+// notify (default true) and mineEveryone (default false) configure what concerns the user (mine.js).
+if (typeof importScripts === 'function') importScripts('db.js', 'gaps.js', 'mine.js');
 const SCHEMA = 3;
 const api = globalThis.browser ?? chrome;
 const store = api.storage.local;
@@ -51,6 +53,81 @@ async function prune() {
   const counts = await feedDB.prune(days);
   historyRuns = historyRuns.filter((run) => run.to >= Date.now() - 30 * 864e5);
   if (counts.messages || counts.events) changed();
+  if (counts.messages) badgeChanged();
+}
+
+// Badge: unread messages that concern the user. Coalesced like `changed`; it reads only unread bodies.
+const ACCENT = '#5946d2', NOTIFY_WINDOW = 30e3, LIVE_WINDOW = 600e3;
+let badgeDirty = false;
+const badgeChanged = () => {
+  if (badgeDirty) return;
+  badgeDirty = true;
+  queue = queue.then(async () => {
+    if (!badgeDirty) return;
+    badgeDirty = false;
+    await updateBadge();
+  }).catch(report);
+};
+const mineRules = async () => {
+  const { selfId, keywords, mineEveryone } = await store.get(['selfId', 'keywords', 'mineEveryone']);
+  return { selfId, keywords: cleanKeywords(keywords), everyone: mineEveryone === true };
+};
+// A reply's stored original decides only when the capture lacks reply_to_author.
+async function mine(message, rules) {
+  if (isMine(message, rules)) return true;
+  if (!rules.selfId || !message.reply_to || message.reply_to_author !== undefined) return false;
+  return isMine(message, { ...rules, original: await feedDB.get('messages', message.reply_to) });
+}
+async function updateBadge() {
+  const rules = await mineRules();
+  let count = 0;
+  if (rules.selfId || rules.keywords.length || rules.everyone) {
+    const { collections = [] } = await store.get('collections');
+    const channels = Object.fromEntries((await feedDB.channels()).map((channel) => [channel.id, channel]));
+    for (const message of await feedDB.unread(collections, channels)) if (await mine(message, rules)) count++;
+  }
+  await api.action?.setBadgeBackgroundColor?.({ color: ACCENT });
+  await api.action?.setBadgeTextColor?.({ color: '#ffffff' });
+  await api.action?.setBadgeText?.({ text: badgeText(count) });
+}
+// At most one notification per channel per 30 s: later messages in the window are summarised when it closes.
+// Window state is in memory only; a suspended worker forgets it and the badge still counts the messages.
+const throttle = {};
+async function showMine(message, count = 1) {
+  const channel = await feedDB.get('channels', message.channel_id);
+  const parent = channel?.parent_id ? await feedDB.get('channels', channel.parent_id) : null;
+  const name = channel?.name ?? message.channel_id;
+  const author = message.author?.name ?? '?';
+  const server = channel?.guild_name ?? parent?.guild_name ?? api.i18n.getMessage('server');
+  const title = count > 1 ? api.i18n.getMessage('mineCollapsed', [count, name]) : api.i18n.getMessage('mineTitle', [author, name, server]);
+  const refs = new Map();
+  for (const [, id] of String(message.content ?? '').matchAll(/<#(\d+)>/g)) refs.set(id, (await feedDB.get('channels', id))?.name ?? '');
+  const body = count > 1 ? api.i18n.getMessage('mineCollapsedBody', [author, server])
+    : plainText(message.content, { user: (id) => id === message.author?.id ? author : api.i18n.getMessage('mention'), channel: (id) => refs.get(id) }) || api.i18n.getMessage('mineNoText');
+  // The packaged icon only: notifications never load a remote image.
+  await api.notifications?.create(`mine:${message.channel_id}:${message.id}`, { type: 'basic', iconUrl: api.runtime.getURL('icons/icon-128.png'), title, message: body });
+}
+async function notifyMine(message, now) {
+  const state = throttle[message.channel_id];
+  if (state && now < state.until) {
+    state.pending++; state.last = message;
+    await api.alarms?.create('mine-notify', { when: Math.min(...Object.values(throttle).filter((s) => s.pending).map((s) => s.until)) });
+    return;
+  }
+  throttle[message.channel_id] = { until: now + NOTIFY_WINDOW, pending: 0 };
+  await showMine(message);
+}
+async function flushNotifications(now = Date.now()) {
+  const { notify } = await store.get('notify');
+  for (const [channel, state] of Object.entries(throttle)) {
+    if (!state.pending) { if (now >= state.until) delete throttle[channel]; continue; }
+    // Chrome may fire an alarm slightly early or late; a second of slack keeps the summary on time.
+    if (now + 1e3 < state.until) continue;
+    throttle[channel] = { until: now + NOTIFY_WINDOW, pending: 0 };
+    if (notify !== false) await showMine(state.last, state.pending);
+  }
+  const next = Object.values(throttle).filter((s) => s.pending).map((s) => s.until);
+  if (next.length) await api.alarms?.create('mine-notify', { when: Math.min(...next) });
 }
 
 async function refreshHealth(now = Date.now()) {
@@ -92,6 +169,7 @@ async function handle({ kind, data }, sender = {}) {
   // Reader commands are extension-origin only; page observations require a tab.
   if (['clean', 'wipe'].includes(kind)) {
     if (sender.url ? !sender.url.startsWith(api.runtime.getURL('')) : sender.tab?.id != null) return;
+    badgeChanged();
     if (kind === 'clean') {
       const { collections = [] } = await store.get('collections');
       const channels = Object.fromEntries((await feedDB.channels()).map((channel) => [channel.id, channel]));
@@ -137,6 +215,8 @@ async function handle({ kind, data }, sender = {}) {
   let wrote = false;
   switch (kind) {
     case 'ready': {
+      // Only the account's own id: it tells the reader which mentions and replies are the user's.
+      if (typeof data?.self === 'string' && /^\d{1,20}$/.test(data.self)) await store.set({ selfId: data.self });
       const from = tab.readySignal ?? lastSignal;
       await (from ? log('gap', { from, to: now, covered: {} }) : log('start'));
       wrote = true;
@@ -151,7 +231,7 @@ async function handle({ kind, data }, sender = {}) {
     case 'message':
     case 'delete':
     case 'history': {
-      const accepted = [];
+      const accepted = [], fresh = [];
       for (const item of kind === 'history' ? data : [data]) {
         const channel = await feedDB.get('channels', item.channel_id);
         const message = { ...item, guild_id: item.guild_id ?? channel?.guild_id };
@@ -159,7 +239,11 @@ async function handle({ kind, data }, sender = {}) {
         if (kind !== 'history' && !item.guild_id) continue;
         if (!message.guild_id || !await allowed(collections, message)) continue;
         if (kind === 'history') message.source = 'history';
+        // A live create is a gateway message not stored before, never edited and recent: not history, not an edit.
+        const live = kind === 'message' && !message.edited_timestamp && !!message.author
+          && Math.abs(now - Date.parse(message.timestamp)) <= LIVE_WINDOW && !await feedDB.get('messages', message.id);
         wrote = await feedDB.writeMessage(message, kind === 'delete' ? now : undefined) || wrote;
+        if (live) fresh.push(message);
         if (kind === 'history') accepted.push(message);
       }
       if (accepted.length) {
@@ -167,6 +251,11 @@ async function handle({ kind, data }, sender = {}) {
         // Keep overlap evidence for the current response sequence in memory only.
         wrote = !!await feedDB.coverGaps(historyRuns) || wrote;
       }
+      if (fresh.length && (await store.get('notify')).notify !== false) {
+        const rules = await mineRules();
+        for (const message of fresh) if (await mine(message, rules)) await notifyMine(message, now);
+      }
+      if (wrote) badgeChanged();
       break;
     }
   }
@@ -183,6 +272,7 @@ let queue = (async () => {
   if (captureSession) session = captureSession;
   await prune();
   await refreshHealth();
+  await updateBadge();
   // Alarms wake suspended MV3 workers; timers alone cannot enforce these deadlines.
   await api.alarms?.create('capture-health', { periodInMinutes: 1 });
   await api.alarms?.create('capture-retention', { periodInMinutes: 360 });
@@ -197,6 +287,7 @@ api.runtime.onMessage.addListener((message, sender, respond) => {
 api.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === 'capture-retention') enqueue(prune);
   if (alarm.name === 'capture-health') enqueue(() => refreshHealth());
+  if (alarm.name === 'mine-notify') enqueue(() => flushNotifications());
 });
 api.tabs?.onRemoved?.addListener((id) => enqueue(async () => {
   delete session.tabs[id];
@@ -206,6 +297,18 @@ api.storage.onChanged?.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.consentedAt) enqueue(() => refreshHealth());
   if (changes.retentionDays) enqueue(prune);
+  if (['collections', 'selfId', 'keywords', 'mineEveryone'].some((key) => key in changes)) badgeChanged();
+});
+// Clicking a notification focuses an open reader on the message, or opens one there.
+api.notifications?.onClicked.addListener((id) => {
+  const [, , message] = id.split(':');
+  api.notifications.clear(id);
+  if (!message) return;
+  api.runtime.sendMessage({ kind: 'reveal', id: message }).catch(() => null).then(async (reply) => {
+    if (reply?.tab == null) return api.tabs.create({ url: `viewer.html?m=${encodeURIComponent(message)}` });
+    await api.tabs.update(reply.tab, { active: true });
+    if (reply.window != null) await api.windows?.update(reply.window, { focused: true });
+  }).catch(report);
 });
 api.runtime.onInstalled?.addListener(({ reason }) => {
   if (reason === 'install') api.tabs.create({ url: 'viewer.html#welcome' });

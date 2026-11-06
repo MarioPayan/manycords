@@ -14,11 +14,12 @@ const message = (id, at = BASE, channel_id = 'c') => ({ id, channel_id,
   author: { id: 'u', username: 'Reader' }, timestamp: new Date(at).toISOString(), content: 'Message' });
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-async function harness({ consent = true, initial = {}, indexed = fakeIndexedDB() } = {}) {
+async function harness({ consent = true, initial = {}, indexed = fakeIndexedDB(), reader = null } = {}) {
   let now = BASE;
   const data = { schema: 3, rev: 0, collections: [{ id: 'all', all: true, ids: [] }],
     ...(consent ? { consentedAt: BASE - 1 } : {}), ...initial };
   const listeners = {}, alarms = [], tabs = [], errors = [], timers = [];
+  const badge = {}, notes = [], cleared = [], focused = [];
   const listen = (name) => ({ addListener(callback) { listeners[name] = callback; } });
   const browser = {
     i18n,
@@ -29,16 +30,21 @@ async function harness({ consent = true, initial = {}, indexed = fakeIndexedDB()
       clear: async () => Object.keys(data).forEach((key) => delete data[key]),
       remove: async (keys) => [].concat(keys).forEach((key) => delete data[key]),
     } },
-    runtime: { onMessage: listen('message'), onInstalled: listen('installed'), getURL: (path) => `extension://${path}` },
+    runtime: { onMessage: listen('message'), onInstalled: listen('installed'), getURL: (path) => `extension://${path}`,
+      // An open reader answers a reveal request with its tab; with none open, delivery fails like the real API.
+      sendMessage: async (payload) => { if (!reader) throw new Error('Receiving end does not exist'); return reader(payload); } },
     alarms: { create: async (name, options) => alarms.push({ name, ...options }), onAlarm: listen('alarm') },
-    tabs: { create: async (options) => tabs.push(options), onRemoved: listen('removed') },
-    action: { onClicked: listen('clicked') },
+    tabs: { create: async (options) => tabs.push(options), onRemoved: listen('removed'), update: async (id, options) => focused.push({ tab: id, ...options }) },
+    windows: { update: async (id, options) => focused.push({ window: id, ...options }) },
+    action: { onClicked: listen('clicked'), setBadgeText: async ({ text }) => { badge.text = text; },
+      setBadgeBackgroundColor: async ({ color }) => { badge.color = color; }, setBadgeTextColor: async ({ color }) => { badge.textColor = color; } },
+    notifications: { create: async (id, options) => notes.push({ id, ...options }), clear: async (id) => cleared.push(id), onClicked: listen('notification') },
   };
   const Clock = class extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } };
   const context = vm.createContext({ browser, Date: Clock, ...indexed,
     console: { error: (...args) => errors.push(args), warn: (...args) => errors.push(args) },
     setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; } });
-  for (const file of ['db.js', 'gaps.js', 'background.js']) vm.runInContext(read(file), context);
+  for (const file of ['db.js', 'gaps.js', 'mine.js', 'background.js']) vm.runInContext(read(file), context);
   const settle = () => vm.runInContext('queue', context);
   await settle();
   const send = async (kind, payload, id = 1) => {
@@ -48,7 +54,7 @@ async function harness({ consent = true, initial = {}, indexed = fakeIndexedDB()
     assert.equal(response?.error, undefined);
     return response?.value;
   };
-  return { data, listeners, alarms, tabs, errors, context, timers, indexed,
+  return { data, listeners, alarms, tabs, errors, context, timers, indexed, badge, notes, cleared, focused,
     db: vm.runInContext('feedDB', context), settle, send,
     advance: (ms) => { now += ms; },
     alarm: async (name = 'capture-health') => { listeners.alarm({ name }); await settle(); },
@@ -347,4 +353,120 @@ test('handshake frames before first READY do not invent a coverage gap', async (
   page.frame('READY', { guilds: [] });
   for (const item of page.sent) await h.send(item.kind, item.data);
   assert.deepEqual(plain((await h.db.events(0)).map((event) => event.type)), ['start']);
+});
+
+const SELF = '900';
+const guildChannels = [{ id: 'c', name: 'general', guild_id: 'g', guild_name: 'Guild' }, { id: 'd', name: 'dev', guild_id: 'g', guild_name: 'Guild' }, { id: '77', name: 'news', guild_id: 'g' }];
+const live = (id, extra = {}, at = BASE) => ({ ...message(id, at), guild_id: 'g', author: { id: 'u', name: 'Ana' }, ...extra });
+
+test('READY keeps only the own user id; hook captures reply author and @everyone', async () => {
+  const page = hook();
+  page.frame('READY', { user: { id: SELF, username: 'me', email: 'private@example.org' }, guilds: [] });
+  assert.deepEqual(page.sent.find((item) => item.kind === 'ready').data, { self: SELF }, 'nothing else from READY leaves the page');
+  page.frame('MESSAGE_CREATE', { ...message('r'), mention_everyone: true, message_reference: { message_id: 'o' }, referenced_message: { id: 'o', author: { id: SELF, username: 'me' }, content: 'private' } });
+  const picked = page.sent.find((item) => item.kind === 'message').data;
+  assert.equal(picked.reply_to, 'o');
+  assert.equal(picked.reply_to_author, SELF);
+  assert.equal(picked.mention_everyone, true);
+  assert.ok(!JSON.stringify(picked).includes('private'), 'the referenced message body is not captured');
+  const h = await harness();
+  await h.page(); await h.send('ready', { self: 'not-an-id' });
+  assert.equal(h.data.selfId, undefined);
+  await h.send('ready', { self: SELF });
+  assert.equal(h.data.selfId, SELF);
+  const blocked = await harness({ consent: false });
+  await blocked.page(); await blocked.send('ready', { self: SELF });
+  assert.equal(blocked.data.selfId, undefined, 'no capture record before consent');
+});
+
+test('badge counts unread mine messages under every containing collection, caps at 99+ and follows read state', async () => {
+  const h = await harness({ initial: { selfId: SELF, keywords: ['Patch'], collections: [{ id: 'all', all: true, ids: [], readAt: 0 }, { id: 'club', ids: ['c'], readAt: 0 }] } });
+  assert.equal(h.badge.text, '', 'empty at startup');
+  assert.equal(h.badge.color, '#5946d2', 'the app accent');
+  await h.page(); await h.send('ready'); await h.send('channels', guildChannels);
+  const rows = [
+    live('own', { author: { id: SELF, name: 'Me' }, content: 'patch notes' }),
+    live('mention', { mentions: [SELF] }, BASE + M),
+    live('keyword', { content: 'Patch notes are up' }, BASE + 2 * M),
+    live('word', { content: 'patchwork quilt' }, BASE + 3 * M),
+    live('reply-stored', { reply_to: 'own' }, BASE + 4 * M),
+    live('reply-author', { reply_to: 'missing', reply_to_author: SELF }, BASE + 5 * M),
+    live('everyone', { mention_everyone: true }, BASE + 6 * M),
+  ];
+  for (const row of rows) await h.send('message', row);
+  await h.settle();
+  assert.equal(h.badge.text, '4', 'mention, keyword and both replies; own message and partial word excluded');
+  await h.change('mineEveryone', true);
+  assert.equal(h.badge.text, '5', '@everyone counts only behind its setting');
+  // Read in one collection but not the other: unread must be newer than EVERY containing collection's readAt.
+  await h.change('collections', [{ id: 'all', all: true, ids: [], readAt: BASE + 2 * M }, { id: 'club', ids: ['c'], readAt: 0 }]);
+  assert.equal(h.badge.text, '3');
+  await h.change('collections', [{ id: 'all', all: true, ids: [], readAt: BASE + 2 * M }, { id: 'club', ids: ['c'], readAt: BASE + 5 * M }]);
+  assert.equal(h.badge.text, '1', 'only the @everyone message is newer than both');
+  for (let i = 0; i < 120; i++) await h.db.writeMessage(live(`bulk${i}`, { mentions: [SELF] }, BASE + 10 * M + i));
+  await h.change('keywords', ['Patch', 'deploy']);
+  assert.equal(h.badge.text, '99+');
+  await h.send('wipe', null, null); await h.settle();
+  assert.equal(h.badge.text, '', 'wiping messages clears the badge');
+  assert.deepEqual(h.errors, []);
+});
+
+test('notifications: live creates only, plain text, local icon, one per channel per 30 s with a summary', async () => {
+  const h = await harness({ initial: { selfId: SELF, keywords: ['deploy'] } });
+  await h.page(); await h.send('ready'); await h.send('channels', guildChannels);
+  await h.send('message', live('first', { content: `**Hey** <@${SELF}> look at ||this|| \`code\` in <#77> ${'long '.repeat(40)}`, mentions: [SELF] }));
+  assert.equal(h.notes.length, 1);
+  const [note] = h.notes;
+  assert.equal(note.id, 'mine:c:first');
+  assert.equal(note.title, 'Ana in #general (Guild)');
+  assert.equal(note.iconUrl, 'extension://icons/icon-128.png', 'the packaged icon, never a remote URL');
+  assert.match(note.message, /^Hey @mention look at this code in #news long/);
+  assert.ok(note.message.length <= 140 && note.message.endsWith('\u2026'), 'trimmed to 140 characters');
+  assert.doesNotMatch(note.message, /[*|`<>]/, 'no markdown symbols');
+  await h.send('message', live('second', { content: 'deploy now' }, BASE + 1000));
+  h.advance(5e3);
+  await h.send('message', live('third', { mentions: [SELF], content: 'and again' }, BASE + 5e3));
+  assert.equal(h.notes.length, 1, 'the channel is rate limited for 30 s');
+  assert.ok(h.alarms.some((alarm) => alarm.name === 'mine-notify' && alarm.when === BASE + 30e3), 'a summary is scheduled at the end of the window');
+  await h.send('message', live('other-channel', { channel_id: 'd', mentions: [SELF] }, BASE + 5e3));
+  assert.equal(h.notes.length, 2, 'other channels have their own window');
+  await h.send('message', live('not-mine', { content: 'nothing here' }, BASE + 6e3));
+  h.advance(25e3); await h.alarm('mine-notify');
+  assert.equal(h.notes.length, 3);
+  assert.equal(h.notes[2].title, '2 new messages for you in #general');
+  assert.equal(h.notes[2].id, 'mine:c:third', 'the summary opens the latest message');
+  await h.send('message', live('fourth', { mentions: [SELF] }, BASE + 31e3));
+  assert.equal(h.notes.length, 3, 'the summary starts a new window');
+  // Never history, edits, already stored messages, own messages or with notifications off.
+  h.advance(60e3); await h.alarm('mine-notify');
+  const count = h.notes.length;
+  await h.send('history', [live('history', { mentions: [SELF] }, BASE + 60e3)]);
+  await h.send('message', live('edited', { mentions: [SELF], edited_timestamp: new Date(BASE + 90e3).toISOString() }, BASE + 60e3));
+  await h.send('message', live('first', { mentions: [SELF], content: 'unfurled' }));
+  await h.send('message', live('own', { author: { id: SELF, name: 'Me' }, content: 'deploy' }, BASE + 90e3));
+  await h.send('message', live('old', { mentions: [SELF] }, BASE - 3600e3));
+  assert.equal(h.notes.length, count);
+  await h.change('notify', false);
+  await h.send('message', live('quiet', { channel_id: 'd', mentions: [SELF] }, BASE + 90e3));
+  assert.equal(h.notes.length, count, 'Notify me off');
+  assert.ok(await h.db.get('messages', 'quiet'), 'capture itself is unaffected');
+  assert.deepEqual(h.errors, []);
+  const blocked = await harness({ consent: false, initial: { selfId: SELF } });
+  await blocked.page(); await blocked.send('ready'); await blocked.send('message', live('x', { mentions: [SELF] }));
+  assert.equal(blocked.notes.length, 0, 'never without consent');
+});
+
+test('clicking a notification focuses an open reader on the message, or opens one there', async () => {
+  const closed = await harness();
+  closed.listeners.notification('mine:c:42');
+  await new Promise((done) => setImmediate(done));
+  assert.deepEqual(plain(closed.tabs), [{ url: 'viewer.html?m=42' }]);
+  assert.deepEqual(closed.cleared, ['mine:c:42']);
+  const requests = [];
+  const open = await harness({ reader: (payload) => { requests.push(payload); return { tab: 5, window: 2 }; } });
+  open.listeners.notification('mine:c:43');
+  await new Promise((done) => setImmediate(done));
+  assert.deepEqual(plain(requests), [{ kind: 'reveal', id: '43' }]);
+  assert.deepEqual(plain(open.focused), [{ tab: 5, active: true }, { window: 2, focused: true }]);
+  assert.equal(open.tabs.length, 0);
 });

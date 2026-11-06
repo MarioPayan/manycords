@@ -24,6 +24,7 @@ const browser = {
 data['m:old'] = { id: 'old' }; // previous schema: wiped on start
 const bg = vm.createContext({ browser, console, Date, ...fakeIndexedDB() }); // no timers: revisions go through the work queue
 vm.runInContext(readFileSync('db.js', 'utf8'), bg);
+vm.runInContext(readFileSync('mine.js', 'utf8'), bg);
 vm.runInContext(readFileSync('background.js', 'utf8'), bg);
 const db = vm.runInContext('feedDB', bg);
 await vm.runInContext('queue', bg);

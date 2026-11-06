@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const manifest = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
-const files = ['hook.js', 'relay.js', 'background.js', 'db.js', 'gaps.js', 'threads.js', 'viewer.html', 'viewer.js', '_locales', 'fonts'];
+const files = ['hook.js', 'relay.js', 'background.js', 'db.js', 'gaps.js', 'mine.js', 'threads.js', 'viewer.html', 'viewer.js', '_locales', 'fonts'];
 const iconPaths = [...new Set([...Object.values(manifest.icons ?? {}), ...Object.values(manifest.action?.default_icon ?? {})])];
 const availableIcons = [];
 const missingIcons = [];

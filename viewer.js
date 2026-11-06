@@ -27,13 +27,15 @@ const fmtFull = (date) => new Date(date).toLocaleString();
 const hm = (date) => new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const THREAD_TYPES = [10, 11, 12], NOT_LISTENABLE = [4, ...THREAD_TYPES], MAX_SHOWN = 400;
 const EMOJIS = ['\u{1f4e3}', '\u2b50', '\u{1f3a8}', '\u{1f6e0}', '\u{1f3ae}', '\u{1f4c1}'];
-let S = { collections: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], stats: {}, buckets: Array(24).fill(0), people: new Map() };
-const ui = { statusOpen: false, hover: null, collection: null, src: '', conv: '', q: '', edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
+let S = { collections: [], chans: {}, guilds: {}, icons: {}, msgs: [], events: [], stats: {}, buckets: Array(24).fill(0), people: new Map(), byId: new Map(), keywords: [] };
+const ui = { statusOpen: false, hover: null, collection: null, src: '', conv: '', q: '', mine: false, edit: null, feedKey: null, expanded: false, seen: new Set(), visibleSince: new Map() };
 const collection = () => S.collections.find((c) => c.id === ui.collection);
 const isThread = (id) => THREAD_TYPES.includes(S.chans[id]?.type);
 const baseChannel = (m) => isThread(m.channel_id) ? S.chans[m.channel_id]?.parent_id : m.channel_id;
 const inCollection = (c, m) => c.all || c.ids.includes(m.channel_id) || c.ids.includes(baseChannel(m));
 const isUnread = (c, m) => Date.parse(m.timestamp) > (c.readAt ?? 0);
+// Same rule as the badge and notifications (mine.js); a reply's original counts when it is loaded.
+const mineOf = (m) => isMine(m, { selfId: S.selfId, keywords: S.keywords, everyone: S.mineEveryone, original: S.byId.get(m.reply_to) });
 const chanName = (id) => S.chans[id]?.name ?? id;
 const guildName = (id) => S.guilds[id] ?? t('server');
 const emojiOf = (c) => c.emoji ?? (c.all ? '\u{1f310}' : '\u{1f4c1}');
@@ -75,9 +77,10 @@ function avatar(author = {}, guild) {
   return imageOrInitial(src, author.name ?? '?', 'av');
 }
 let settingsKey, collectionsKey;
+const MINE_KEYS = ['selfId', 'keywords', 'notify', 'mineEveryone'];
 async function load(force = false) {
-  const settings = await store.get(['collections', 'lastSignal', 'theme', 'rev', 'health', 'consentedAt', 'retentionDays', 'readingDirection']);
-  const key = JSON.stringify([settings.collections, settings.theme, settings.health, settings.consentedAt, settings.retentionDays, settings.readingDirection]);
+  const settings = await store.get(['collections', 'lastSignal', 'theme', 'rev', 'health', 'consentedAt', 'retentionDays', 'readingDirection', ...MINE_KEYS]);
+  const key = JSON.stringify([settings.collections, settings.theme, settings.health, settings.consentedAt, settings.retentionDays, settings.readingDirection, ...MINE_KEYS.map((name) => settings[name])]);
   const revised = S.rev !== settings.rev || settingsKey === undefined;
   if (!force && !revised && key === settingsKey) return false;
   const nextCollectionsKey = JSON.stringify(settings.collections ?? []);
@@ -86,6 +89,7 @@ async function load(force = false) {
   S.collections = settings.collections ?? [];
   if (pending && !S.collections.some((c) => c.id === pending.id)) S.collections.push(pending);
   if (!S.collections.some((c) => c.id === ui.collection)) ui.collection = S.collections[0]?.id ?? null;
+  Object.assign(S, { selfId: settings.selfId, keywords: cleanKeywords(settings.keywords), notify: settings.notify !== false, mineEveryone: settings.mineEveryone === true });
   Object.assign(S, { lastSignal: settings.lastSignal, theme: settings.theme ?? 'system', health: settings.health, consentedAt: settings.consentedAt, retentionDays: settings.retentionDays ?? 14, direction: settings.readingDirection === 'bottom' ? 'bottom' : 'top' });
   if (revised) {
     const [channels, events] = await Promise.all([feedDB.channels(), feedDB.events(Date.now() - 864e5)]);
@@ -101,6 +105,7 @@ async function load(force = false) {
     const limit = ui.fullHistory ? Number.MAX_SAFE_INTEGER : ui.windowLimit;
     S.msgs = await feedDB.recent(collection(), S.chans, limit);
     S.people = new Map(S.msgs.filter((m) => m.author?.id).map((m) => [m.author.id, m.author.name]));
+    S.byId = new Map(S.msgs.map((m) => [m.id, m]));
   }
   S.rev = settings.rev; settingsKey = key; collectionsKey = nextCollectionsKey;
   return true;
@@ -169,6 +174,7 @@ function renderHead(c, list) {
   for (const [key, value] of [['src', ui.src && guildName(ui.src)], ['conv', ui.conv && `#${chanName(ui.conv)}`], ['q', ui.q]]) {
     if (value) sub.append(el('span', { class: 'chipf' }, el('span', {}, value), button('\u00d7', { 'data-clear': key, 'aria-label': t(key === 'q' ? 'clearSearch' : 'removeFilter') })));
   }
+  sub.append(button(t('onlyMine'), { class: 'minechip', id: 'onlymine', 'aria-pressed': String(ui.mine), title: t('onlyMineHint') }));
   sub.append(el('span', { class: 'grow' }), button(t('markRead'), { class: 'textbtn', id: 'markread' }));
   patch($('#head'), [el('div', { class: 'titlerow' }, el('span', { class: 'em' }, emojiOf(c)), el('h1', {}, c.name), button('\u270e', { class: 'iconbtn', id: 'edit', 'aria-label': t('editCollection'), title: t('editCollection') }), el('span', { class: 'grow' }),
     el('label', { class: 'search' }, el('input', { id: 'q', placeholder: t('searchIn', [c.name]), value: ui.q, 'aria-label': t('search') })), button(isDark() ? '\u2600' : '\u263e', { class: 'iconbtn', id: 'themebtn', 'aria-label': t('changeTheme'), title: t('changeTheme') }), button('\u22ef', { class: 'iconbtn', id: 'mobilemenu', 'aria-label': t('settings') })), sub]);
@@ -388,13 +394,13 @@ async function toggleEarlier() {
 }
 function feedMessages(c) {
   const q = ui.q.toLowerCase();
-  return S.msgs.filter((m) => inCollection(c, m) && (!ui.src || m.guild_id === ui.src) && (!ui.conv || m.channel_id === ui.conv) && (!q || `${m.content ?? ''} ${m.author?.name ?? ''}`.toLowerCase().includes(q)));
+  return S.msgs.filter((m) => inCollection(c, m) && (!ui.src || m.guild_id === ui.src) && (!ui.conv || m.channel_id === ui.conv) && (!ui.mine || mineOf(m)) && (!q || `${m.content ?? ''} ${m.author?.name ?? ''}`.toLowerCase().includes(q)));
 }
 function renderRiver() {
   const c = collection(), scroll = $('#scroll');
   const focusedId = document.activeElement?.closest('.entry')?.dataset.id;
   if (!c) { $('#head').replaceChildren(); showEmpty(el('div', { class: 'empty' }, el('h2', {}, t('noCollections')), el('p', {}, t('createCollectionHint')), button(t('newCollection'), { class: 'btn primary', id: 'add2' }))); return; }
-  const key = JSON.stringify([c.id, c.ids, S.direction, ui.src, ui.conv, ui.q]);
+  const key = JSON.stringify([c.id, c.ids, S.direction, ui.src, ui.conv, ui.q, ui.mine]);
   const changed = key !== ui.feedKey;
   const filtered = feedMessages(c);
   if (changed) { ui.expanded = false; ui.seen.clear(); ui.visibleSince.clear(); ui.openReadAt = displayBoundary(filtered, c.readAt ?? 0); }
@@ -422,7 +428,7 @@ function renderRiver() {
   mountRiver();
   river.style.setProperty('--gut', `${gut}px`);
   const oldEnd = [];
-  const earlierCount = !ui.src && !ui.conv && !ui.q ? Math.max(order.earlier.length, (S.stats[c.id]?.total ?? S.msgs.length) - order.unread.length) : order.earlier.length;
+  const earlierCount = !ui.src && !ui.conv && !ui.q && !ui.mine ? Math.max(order.earlier.length, (S.stats[c.id]?.total ?? S.msgs.length) - order.unread.length) : order.earlier.length;
   if (earlierCount && order.unread.length) oldEnd.push(keyed('earlier', JSON.stringify([earlierCount, ui.expanded]), () => button(t('earlierRead', [earlierCount]), { class: 'textbtn earlier', 'aria-expanded': String(ui.expanded), onclick: () => toggleEarlier().catch(reportError) })));
   if ((S.stats[c.id]?.total ?? 0) > S.msgs.length) { const text = t('recentLimit', [S.msgs.length, S.stats[c.id].total]); oldEnd.push(keyed('more', text, () => el('div', { class: 'more' }, text))); }
   const endcap = keyed('endcap', S.direction, () => el('div', { class: 'endcap' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '\u2713'), t(top ? 'feedEndTop' : 'feedEnd')));
@@ -441,7 +447,7 @@ function renderRiver() {
     }
     const reply = byId.get(m.reply_to), fresh = !riverNodes.has(`m:${m.id}`);
     const entry = keyed(`m:${m.id}`, messageSignature(m, reply), () => messageNode(m, reply));
-    entry.classList.toggle('unread', isUnread(c, m)); entry.dataset.c = m.channel_id;
+    entry.classList.toggle('unread', isUnread(c, m)); entry.classList.toggle('mine', mineOf(m)); entry.dataset.c = m.channel_id;
     entry.setAttribute('aria-posinset', index + 1); entry.setAttribute('aria-setsize', list.length);
     // Only messages newer than anything already on screen animate: never opening, filtering or expanding.
     if (fresh && !changed && time > ui.newestShown) arrivals.set(m.id, 0);
@@ -477,6 +483,7 @@ function renderRiver() {
 function render() {
   if (S.theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme;
   $('#theme').value = S.theme; $('#retention').value = String(S.retentionDays); $('#direction').value = S.direction;
+  $('#notify').checked = S.notify; $('#mine-everyone').checked = S.mineEveryone;
   renderSide(); renderRiver();
 }
 // A visible bottom must remain in view for a full second. Unseen predecessors block advancement.
@@ -495,7 +502,7 @@ async function sampleReading() {
   }
   for (const id of ui.visibleSince.keys()) if (!present.has(id)) ui.visibleSince.delete(id);
   // A filter hides unread messages, so only the whole feed at its newest edge may settle them unseen.
-  const settles = S.direction === 'top' && ui.follow && !ui.src && !ui.conv && !ui.q;
+  const settles = S.direction === 'top' && ui.follow && !ui.src && !ui.conv && !ui.q && !ui.mine;
   const next = (settles ? readThrough : readHighWater)(S.msgs.filter((m) => inCollection(c, m)), c.readAt ?? 0, ui.seen);
   if (next > (c.readAt ?? 0)) {
     c.readAt = next; savingRead = true;
@@ -582,6 +589,37 @@ function showShortcuts() {
   const shortcuts = [['j / k', 'shortcutMove'], ['n', 'shortcutUnread'], ['m', 'markRead'], ['/', 'search'], ['e', 'editCollection'], ['Esc', 'close'], ['?', 'shortcuts']];
   overlay(t('shortcuts'), el('dl', {}, shortcuts.map(([key, name]) => [el('dt', {}, key), el('dd', {}, t(name))])), button(t('close'), { class: 'btn', onclick: closeOverlay }));
 }
+// Keywords save on every add or remove; the list redraws in place so the input keeps focus.
+function drawKeywords() {
+  patch($('#kw-list'), S.keywords.length ? S.keywords.map((word) => el('span', { class: 'chipf' }, el('span', {}, word), button('\u00d7', { 'data-kw-remove': word, 'aria-label': t('removeKeyword', [word]) })))
+    : [el('p', { class: 'mono' }, t('noKeywords'))]);
+}
+function showKeywords() {
+  overlay(t('keywords'), el('p', {}, t('keywordsHint')), S.selfId ? null : el('p', { class: 'health-copy' }, t('selfUnknown')),
+    el('div', { class: 'kwrow' }, el('input', { class: 'inp', id: 'kw-input', maxlength: '40', placeholder: t('keywordPlaceholder'), 'aria-label': t('keywordPlaceholder') }), button(t('addKeyword'), { class: 'btn', id: 'kw-add' })),
+    el('div', { class: 'kwlist', id: 'kw-list' }), button(t('done'), { class: 'btn primary', onclick: closeOverlay }));
+  drawKeywords();
+}
+async function saveKeywords(list) {
+  S.keywords = cleanKeywords(list); drawKeywords();
+  await store.set({ keywords: S.keywords });
+}
+async function addKeyword() {
+  const input = $('#kw-input'), value = input.value.trim(); if (!value) return;
+  input.value = ''; input.focus();
+  await saveKeywords([...S.keywords, value]);
+}
+// A notification click: show the message in a collection that holds it, with no filter that could hide it.
+async function reveal(id) {
+  const m = id && await feedDB.get('messages', id); if (!m) return;
+  const holder = [collection(), ...S.collections].find((c) => c && inCollection(c, m)); if (!holder) return;
+  if (holder.id !== ui.collection) { ui.collection = holder.id; ui.feedKey = null; }
+  ui.src = ui.conv = ui.q = ''; ui.mine = false; closeOverlay(); if (ui.edit) closeSheet();
+  await refresh(true);
+  const find = () => [...document.querySelectorAll('.entry')].find((node) => node.dataset.id === id);
+  if (!find() && $('.earlier') && !ui.expanded) await toggleEarlier();
+  find()?.scrollIntoView({ block: 'center' }); find()?.focus({ preventScroll: true });
+}
 async function exportJSON(everything) {
   const selected = everything ? { all: true, ids: [] } : collection(); if (!selected) return;
   const [messages, channels, events] = await Promise.all([feedDB.recent(selected, S.chans, Number.MAX_SAFE_INTEGER), feedDB.channels(), feedDB.events(0)]);
@@ -611,6 +649,10 @@ async function click(event) {
   else if (b.dataset.clear) { ui[b.dataset.clear] = ''; render(); }
   else if (b.id === 'status-toggle') { ui.statusOpen = !ui.statusOpen; renderStatus(); }
   else if (b.id === 'markread') await markRead();
+  else if (b.id === 'onlymine') { ui.mine = !ui.mine; renderRiver(); }
+  else if (b.id === 'keywords') showKeywords();
+  else if (b.id === 'kw-add') await addKeyword();
+  else if (b.dataset.kwRemove) await saveKeywords(S.keywords.filter((word) => word !== b.dataset.kwRemove));
   else if (b.id === 'themebtn') await store.set({ theme: isDark() ? 'light' : 'dark' });
   else if (b.id === 'edit' || b.id === 'emptyedit') openEdit(false);
   else if (b.id === 'add' || b.id === 'add2') newCollection();
@@ -647,6 +689,8 @@ document.addEventListener('change', (event) => {
   if (event.target.id === 'theme') store.set({ theme: event.target.value }).catch(reportError);
   if (event.target.id === 'retention') store.set({ retentionDays: Number(event.target.value) }).catch(reportError);
   if (event.target.id === 'direction') store.set({ readingDirection: event.target.value }).catch(reportError);
+  if (event.target.id === 'notify') store.set({ notify: event.target.checked }).catch(reportError);
+  if (event.target.id === 'mine-everyone') store.set({ mineEveryone: event.target.checked }).catch(reportError);
 });
 document.addEventListener('keydown', (event) => {
   const dialog = $('#scrim [role="dialog"], #overlay [role="dialog"]');
@@ -659,6 +703,7 @@ document.addEventListener('keydown', (event) => {
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }
     if (event.key === 'Enter' && event.target.id === 'cname') $('#sdone').click();
+    if (event.key === 'Enter' && event.target.id === 'kw-input') addKeyword().catch(reportError);
     return;
   }
   if (event.key === 'Escape') { $('#menu').hidden = true; $('#menubtn').setAttribute('aria-expanded', 'false'); return; }
@@ -687,10 +732,22 @@ let refreshing = Promise.resolve();
 const refresh = (force = false) => {
   refreshing = refreshing.then(async () => { if (await load(force)) render(); }).catch(reportError); return refreshing;
 };
-store.onChanged.addListener((changes) => { if (['rev', 'collections', 'theme', 'health', 'consentedAt', 'retentionDays', 'readingDirection'].some((key) => key in changes)) refresh(); });
+store.onChanged.addListener((changes) => { if (['rev', 'collections', 'theme', 'health', 'consentedAt', 'retentionDays', 'readingDirection', ...MINE_KEYS].some((key) => key in changes)) refresh(); });
+// The background asks open readers to show a clicked notification's message; the answer names this tab to focus.
+api.runtime.onMessage?.addListener((message, _sender, respond) => {
+  if (message?.kind !== 'reveal') return;
+  Promise.resolve(api.tabs?.getCurrent?.()).then((tab) => respond({ tab: tab?.id ?? null, window: tab?.windowId ?? null }), () => respond({ tab: null }));
+  reveal(message.id).catch(reportError);
+  return true;
+});
 setInterval(renderStatus, 30e3);
 for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
 for (const attr of ['title', 'aria-label']) for (const node of document.querySelectorAll(`[data-i18n-${attr}]`)) node.setAttribute(attr, t(node.getAttribute(`data-i18n-${attr}`)));
 document.documentElement.lang = api.i18n.getUILanguage();
 window.addEventListener('hashchange', () => { if (location.hash === '#welcome') showWelcome(); });
-refresh().then(() => { if (location.hash === '#welcome' || !S.consentedAt) showWelcome(); });
+refresh().then(() => {
+  if (location.hash === '#welcome' || !S.consentedAt) return showWelcome();
+  // viewer.html?m=<message id> opens on that message (a notification click with no reader open).
+  const target = new URLSearchParams(location.search).get('m');
+  if (target) reveal(target).catch(reportError);
+});

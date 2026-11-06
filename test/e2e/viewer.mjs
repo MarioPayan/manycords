@@ -59,8 +59,102 @@ const lateImage = async (page, name) => {
   await page.route(`https://cdn.discordapp.com/attachments/**/${name}*`, async (route) => { await new Promise((done) => setTimeout(done, 2000)); await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200"/>' }); });
   return { content: name, attachments: [{ filename: name, content_type: 'image/png', url: `https://cdn.discordapp.com/attachments/1/2/${name}` }] };
 };
+// Fixture people ids follow viewer-shim.js: Tito is person 2.
+const TITO = String(1300000000000000000n + 2n * 4194304n);
+const SHOTS = process.env.MINE_SHOTS;
+const shot = async (page, name, options = {}) => {
+  if (!SHOTS) return;
+  const scheme = await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  await settle(page); await page.screenshot({ path: resolve(SHOTS, `mine-${name}-${scheme}.png`), ...options });
+};
+const signalColor = (page) => page.evaluate(() => { const node = document.createElement('i'); node.style.color = 'var(--signal)'; document.body.append(node); const value = getComputedStyle(node).color; node.remove(); return value; });
 const caughtUp = async (page) => { await page.click('#markread'); await page.waitForFunction(() => document.querySelectorAll('.entry').length >= 50); await settle(page); };
 const sections = {
+  async 'only mine filters the feed, combines with search and marks mine messages'(page) {
+    await page.evaluate((self) => browser.storage.local.set({ selfId: self, keywords: ['Rerun'] }), TITO);
+    // m9 matches the keyword in the unread block; Tito's own m8 never counts.
+    await page.waitForFunction(() => document.querySelector('.entry[data-id="m9"]')?.classList.contains('mine'));
+    assert.deepEqual(await page.$$eval('.entry.mine', (nodes) => nodes.map((node) => node.dataset.id)), ['m9'], 'only m9 is marked in the unread block');
+    const marker = await page.locator('.entry[data-id="m9"] .who').evaluate((node) => getComputedStyle(node, '::before').backgroundColor);
+    assert.equal(marker, await signalColor(page), 'the marker uses the accent');
+    const chip = page.locator('#onlymine');
+    assert.equal(await chip.getAttribute('aria-pressed'), 'false');
+    await chip.click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 1);
+    assert.equal(await chip.getAttribute('aria-pressed'), 'true');
+    // Like every filter, the feed key resets the reading order: the unread mine message first, read ones collapsed.
+    assert.deepEqual(await entryIds(page), ['m9'], 'only the unread mine message opens');
+    await shot(page, 'head', { clip: { x: 272, y: 0, width: 1088, height: 200 } });
+    await page.locator('.earlier').click();
+    // Keyword in m0 and m9, mention of the user in m4; Tito's own messages never count.
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 3);
+    assert.deepEqual(await entryIds(page), ['m9', 'm4', 'm0'], 'only mine, newest first');
+    assert.equal(await page.locator('.entry:not(.mine)').count(), 0);
+    await page.locator('#q').fill('rerun');
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 1 && document.querySelector('.earlier'));
+    await page.locator('.earlier').click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 2);
+    assert.deepEqual(await entryIds(page), ['m9', 'm0'], 'combines with search');
+    await page.locator('[data-clear="q"]').click();
+    await page.locator('[data-src="g2"]').click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 0);
+    await page.locator('[data-src="g2"]').click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 1);
+    await chip.click();
+    await page.waitForFunction(() => document.querySelectorAll('.entry').length === 8);
+    assert.equal(await chip.getAttribute('aria-pressed'), 'false', 'off again: the unread block returns');
+    await arrive(page, 'all-hands', { mention_everyone: true });
+    await page.locator('.entry[data-id="all-hands"]').waitFor();
+    assert.equal(await page.locator('.entry[data-id="all-hands"]').evaluate((node) => node.classList.contains('mine')), false, '@everyone is off by default');
+    await page.evaluate(() => browser.storage.local.set({ mineEveryone: true }));
+    await page.waitForFunction(() => document.querySelector('.entry[data-id="all-hands"]').classList.contains('mine'));
+    assert.equal(await page.locator('.entry[data-id="m13"]').evaluate((node) => node.classList.contains('mine')), false, 'the @everyone text alone is not the captured flag');
+  },
+  async 'the keyword editor saves words, toggles and the marker follows'(page) {
+    await page.click('#menubtn');
+    assert.equal(await page.locator('#notify').isChecked(), true, 'Notify me defaults on');
+    assert.equal(await page.locator('#mine-everyone').isChecked(), false, '@everyone defaults off');
+    await page.locator('#notify').click();
+    await page.waitForFunction(async () => (await browser.storage.local.get('notify')).notify === false);
+    await page.locator('#mine-everyone').click();
+    await page.waitForFunction(async () => (await browser.storage.local.get('mineEveryone')).mineEveryone === true);
+    await page.click('#keywords');
+    await page.locator('#kw-input').waitFor();
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'kw-input', 'the editor focuses its input');
+    assert.equal(await page.locator('#overlay .health-copy').count(), 1, 'without an own id, the editor says only keywords count');
+    await page.locator('#kw-input').fill('WEEKEND');
+    await page.click('#kw-add');
+    await page.locator('#kw-input').fill('jam');
+    await page.keyboard.press('Enter');
+    await page.locator('#kw-input').fill('weekend');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelectorAll('#kw-list .chipf').length === 2);
+    assert.deepEqual(await page.evaluate(async () => (await browser.storage.local.get('keywords')).keywords), ['WEEKEND', 'jam'], 'saved, duplicates folded');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'kw-input', 'adding keeps the input focused');
+    await shot(page, 'keywords');
+    await page.locator('[data-kw-remove="jam"]').click();
+    await page.locator('#kw-input').fill('Maintenance');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(async () => (await browser.storage.local.get('keywords')).keywords.join() === 'WEEKEND,Maintenance');
+    await page.locator('#overlay .btn.primary').click();
+    assert.equal(await page.locator('#overlay').count(), 0);
+    // "Game jam this weekend." and "Maintenance starts at 08:30." are unread and now mine.
+    await page.waitForFunction(() => document.querySelectorAll('.entry.mine').length === 2);
+    assert.deepEqual(await page.$$eval('.entry.mine', (nodes) => nodes.map((node) => node.dataset.id)), ['m14', 'm13']);
+    await page.mouse.move(0, 0);
+    await shot(page, 'feed', { clip: { x: 272, y: 0, width: 1088, height: 640 } });
+  },
+  async 'a notification link opens the reader on its message'(page) {
+    const reader = await page.context().newPage();
+    try {
+      await reader.route('https://cdn.discordapp.com/**', (route) => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"/>' }));
+      const lang = new URL(page.url()).searchParams.get('lang');
+      // m3 is read and older than the unread block, so the reader must expand the earlier messages to show it.
+      await reader.goto(`http://127.0.0.1:${server.address().port}/viewer.html?lang=${lang}&consented=1&m=m3`);
+      await reader.waitForFunction(() => document.activeElement?.dataset?.id === 'm3');
+      assert.ok(await reader.locator('.entry[data-id="m3"]').evaluate((node) => { const box = node.getBoundingClientRect(), scroll = document.querySelector('#scroll').getBoundingClientRect(); return box.top >= scroll.top && box.bottom <= scroll.bottom; }), 'the message is in view');
+    } finally { await reader.close(); }
+  },
   async 'hover dims other conversations without flashing'(page) {
     const hovered = await page.locator('.entry[data-id="m13"]').getAttribute('data-c');
     await page.locator('.entry[data-id="m13"]').hover();

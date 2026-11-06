@@ -528,5 +528,82 @@
   },
   "exportEverything": {
     "message": "Exportar todo (JSON)"
+  },
+  "mineTitle": {
+    "message": "$AUTHOR$ en #$CHANNEL$ ($SERVER$)",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      },
+      "channel": {
+        "content": "$2"
+      },
+      "server": {
+        "content": "$3"
+      }
+    }
+  },
+  "mineCollapsed": {
+    "message": "$COUNT$ mensajes nuevos para ti en #$CHANNEL$",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "channel": {
+        "content": "$2"
+      }
+    }
+  },
+  "mineCollapsedBody": {
+    "message": "El último, de $AUTHOR$ ($SERVER$)",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      },
+      "server": {
+        "content": "$2"
+      }
+    }
+  },
+  "mineNoText": {
+    "message": "Mensaje sin texto"
+  },
+  "onlyMine": {
+    "message": "Solo lo mío"
+  },
+  "onlyMineHint": {
+    "message": "Muestra solo los mensajes que te mencionan, te responden o contienen tus palabras clave"
+  },
+  "keywords": {
+    "message": "Palabras clave"
+  },
+  "keywordsHint": {
+    "message": "Los mensajes que te mencionan, te responden o contienen una de estas palabras son tuyos: encienden el contador de la barra y pueden avisarte. No importan mayúsculas ni acentos; solo cuentan palabras completas."
+  },
+  "selfUnknown": {
+    "message": "Abre Discord una vez para que el lector sepa cuál es tu cuenta. Hasta entonces, solo cuentan las palabras clave."
+  },
+  "keywordPlaceholder": {
+    "message": "Añade una palabra o frase"
+  },
+  "addKeyword": {
+    "message": "Añadir"
+  },
+  "removeKeyword": {
+    "message": "Quitar $WORD$",
+    "placeholders": {
+      "word": {
+        "content": "$1"
+      }
+    }
+  },
+  "noKeywords": {
+    "message": "Aún no hay palabras clave."
+  },
+  "notifyMe": {
+    "message": "Avisarme"
+  },
+  "countEveryone": {
+    "message": "Contar @everyone/@here"
   }
 }

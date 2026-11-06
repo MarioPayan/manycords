@@ -528,5 +528,82 @@
   },
   "exportEverything": {
     "message": "Export everything (JSON)"
+  },
+  "mineTitle": {
+    "message": "$AUTHOR$ in #$CHANNEL$ ($SERVER$)",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      },
+      "channel": {
+        "content": "$2"
+      },
+      "server": {
+        "content": "$3"
+      }
+    }
+  },
+  "mineCollapsed": {
+    "message": "$COUNT$ new messages for you in #$CHANNEL$",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "channel": {
+        "content": "$2"
+      }
+    }
+  },
+  "mineCollapsedBody": {
+    "message": "Latest from $AUTHOR$ ($SERVER$)",
+    "placeholders": {
+      "author": {
+        "content": "$1"
+      },
+      "server": {
+        "content": "$2"
+      }
+    }
+  },
+  "mineNoText": {
+    "message": "Message without text"
+  },
+  "onlyMine": {
+    "message": "Only mine"
+  },
+  "onlyMineHint": {
+    "message": "Show only messages that mention you, reply to you or match your keywords"
+  },
+  "keywords": {
+    "message": "Keywords"
+  },
+  "keywordsHint": {
+    "message": "Messages that mention you, reply to you or contain one of these words are yours: they light the toolbar badge and can notify you. Case and accents are ignored; only whole words match."
+  },
+  "selfUnknown": {
+    "message": "Open Discord once so the reader learns which account is yours. Until then, only keywords count."
+  },
+  "keywordPlaceholder": {
+    "message": "Add a word or phrase"
+  },
+  "addKeyword": {
+    "message": "Add"
+  },
+  "removeKeyword": {
+    "message": "Remove $WORD$",
+    "placeholders": {
+      "word": {
+        "content": "$1"
+      }
+    }
+  },
+  "noKeywords": {
+    "message": "No keywords yet."
+  },
+  "notifyMe": {
+    "message": "Notify me"
+  },
+  "countEveryone": {
+    "message": "Count @everyone/@here"
   }
 }

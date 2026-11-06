@@ -17,7 +17,8 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "alarms"
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "https://discord.com/*"
@@ -27,6 +28,7 @@
     "scripts": [
       "db.js",
       "gaps.js",
+      "mine.js",
       "background.js"
     ]
   },

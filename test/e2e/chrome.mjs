@@ -26,7 +26,7 @@ try {
   const timestamp = new Date().toISOString();
   const frames = [
     { op: 10, s: null, t: null, d: { heartbeat_interval: 41250 } },
-    { op: 0, s: 1, t: 'READY', d: { guilds: [{ id: 'g1', properties: { name: 'Community' }, channels: [
+    { op: 0, s: 1, t: 'READY', d: { user: { id: '900', username: 'me', email: 'private@example.org' }, guilds: [{ id: 'g1', properties: { name: 'Community' }, channels: [
       { id: 'k1', name: 'Information', type: 4, position: 0 },
       { id: 'c1', name: 'news', type: 0, parent_id: 'k1', position: 0 },
       { id: 'c2', name: 'general', type: 0, position: 1 },
@@ -71,6 +71,18 @@ try {
   await viewer.locator('.entry.deleted .txt').filter({ hasText: 'Patch edited' }).waitFor();
   assert.equal(await viewer.evaluate(async () => (await feedDB.get('messages', '100')).author.name), 'Leo');
   assert.equal(await viewer.locator('.entry').count(), 3); // two gateway messages + one history message
+  // A captured mention of the READY user lights the toolbar badge and raises a local notification.
+  assert.equal(await worker.evaluate(() => chrome.action.getBadgeText({})), '', 'nothing concerns the user yet');
+  await page.evaluate(() => JSON.parse(JSON.stringify({ op: 0, s: 6, t: 'MESSAGE_CREATE', d: { id: '102', channel_id: 'c2', guild_id: 'g1', content: '<@900> can you **check** this?', mentions: [{ id: '900', username: 'me' }], timestamp: new Date().toISOString(), author: { id: 'u2', username: 'Ana' } } })));
+  const deadline = Date.now() + 5000;
+  let badge;
+  while ((badge = await worker.evaluate(() => chrome.action.getBadgeText({}))) !== '1' && Date.now() < deadline) await new Promise((done) => setTimeout(done, 50));
+  assert.equal(badge, '1', 'the badge counts the unread mention');
+  const stored = await worker.evaluate(() => chrome.storage.local.get(null));
+  assert.equal(stored.selfId, '900', 'READY stores the own user id');
+  assert.ok(!JSON.stringify(stored).includes('private@example.org'), 'no other READY user data is stored');
+  const notes = await worker.evaluate(() => chrome.notifications.getAll());
+  assert.deepEqual(Object.keys(notes), ['mine:c2:102'], 'one notification for the live mention');
   assert.deepEqual(errors, []);
   if (process.argv[2]) await viewer.screenshot({ path: resolve(process.argv[2]), fullPage: true });
   console.log('Chrome gateway → IndexedDB → viewer passed');

@@ -16,6 +16,8 @@
     timestamp: d.timestamp,
     edited_timestamp: d.edited_timestamp,
     reply_to: d.message_reference?.message_id,
+    reply_to_author: d.referenced_message?.author?.id,
+    mention_everyone: d.mention_everyone,
     mentions: d.mentions?.map((u) => u.id),
     attachments: d.attachments?.map((a) => ({ filename: a.filename, url: a.url,
       proxy_url: a.proxy_url, content_type: a.content_type, width: a.width, height: a.height, size: a.size })),
@@ -53,7 +55,8 @@
         send('delete', { id: d.id, channel_id: d.channel_id, guild_id: d.guild_id ?? null });
         break;
       case 'READY':
-        send('ready', null); // new session: events since the last one are NOT replayed
+        // New session: events since the last one are NOT replayed. Only the user's own id is kept from READY.
+        send('ready', typeof d.user?.id === 'string' ? { self: d.user.id } : null);
         send('channels', (d.guilds ?? []).flatMap(channelsOf));
         break;
       case 'RESUMED':

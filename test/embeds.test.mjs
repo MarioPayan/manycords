@@ -87,7 +87,7 @@ test('an unfurl in MESSAGE_UPDATE replaces embeds; an update without the key kee
       clear: async () => Object.keys(data).forEach((key) => delete data[key]),
     } } };
   const bg = vm.createContext({ browser, console, Date, ...fakeIndexedDB() });
-  vm.runInContext(read('db.js'), bg); vm.runInContext(read('background.js'), bg);
+  for (const file of ['db.js', 'mine.js', 'background.js']) vm.runInContext(read(file), bg);
   const settle = async () => { let q; do { q = vm.runInContext('queue', bg); await q; } while (q !== vm.runInContext('queue', bg)); };
   await settle();
   data.consentedAt = Date.now();

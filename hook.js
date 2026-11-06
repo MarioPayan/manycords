@@ -7,6 +7,34 @@
   const samples = [];
   const send = (kind, data) => window.postMessage({ 'discord-feed': true, kind, data }, location.origin);
 
+  // Embeds keep only what the reader draws. Media keep Discord's own proxy copy, never the third-party url
+  // (a video keeps its url only as a link target); anything outside Discord's image hosts is dropped.
+  const MEDIA_HOSTS = ['media.discordapp.net', 'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net', 'cdn.discordapp.com'];
+  const text = (value, max) => typeof value === 'string' && value ? value.slice(0, max) : undefined;
+  const web = (value) => typeof value === 'string' && /^https?:\/\//i.test(value) && value.length <= 2048 ? value : undefined;
+  const size = (value) => Number.isFinite(value) && value > 0 ? value : undefined;
+  const media = (m, keepUrl) => {
+    let proxy;
+    try { proxy = m?.proxy_url && new URL(m.proxy_url); } catch {}
+    const proxy_url = proxy && proxy.protocol === 'https:' && MEDIA_HOSTS.includes(proxy.hostname) ? proxy.href : undefined;
+    const url = keepUrl ? web(m?.url) : undefined;
+    return proxy_url || url ? { proxy_url, url, width: size(m.width), height: size(m.height) } : undefined;
+  };
+  const pickEmbed = (e) => ({
+    type: text(e?.type, 32),
+    url: web(e?.url),
+    title: text(e?.title, 256),
+    description: text(e?.description, 2000),
+    color: Number.isInteger(e?.color) && e.color >= 0 && e.color <= 0xffffff ? e.color : undefined,
+    author: e?.author?.name ? { name: text(e.author.name, 256), url: web(e.author.url) } : undefined,
+    provider: e?.provider?.name ? { name: text(e.provider.name, 256) } : undefined,
+    footer: e?.footer?.text ? { text: text(e.footer.text, 2048) } : undefined,
+    fields: Array.isArray(e?.fields) && e.fields.length ? e.fields.slice(0, 10).map((f) => ({ name: text(f?.name, 256), value: text(f?.value, 1024), inline: f?.inline === true })) : undefined,
+    image: media(e?.image),
+    thumbnail: media(e?.thumbnail),
+    video: media(e?.video, true),
+  });
+
   const pickMessage = (d) => ({
     id: d.id,
     channel_id: d.channel_id,
@@ -16,10 +44,12 @@
     timestamp: d.timestamp,
     edited_timestamp: d.edited_timestamp,
     reply_to: d.message_reference?.message_id,
+    reply_author: d.referenced_message?.author && (d.referenced_message.member?.nick || d.referenced_message.author.global_name || d.referenced_message.author.username),
     mentions: d.mentions?.map((u) => u.id),
     attachments: d.attachments?.map((a) => ({ filename: a.filename, url: a.url,
       proxy_url: a.proxy_url, content_type: a.content_type, width: a.width, height: a.height, size: a.size })),
-    embeds: d.embeds?.length,
+    // Absent on partial updates, so a stored list survives; an update that carries the key replaces it.
+    embeds: Array.isArray(d.embeds) ? d.embeds.slice(0, 10).map(pickEmbed) : undefined,
     stickers: d.sticker_items?.map((s) => s.name),
   });
   const channel = (c, g = {}) => ({

@@ -11,7 +11,8 @@ window.fixtureReady = (async () => {
     });
   };
   const now = Date.now(), iso = (minutes) => new Date(now - minutes * 60e3).toISOString();
-  const data = { schema: 3, rev: 1, lastSignal: now - 4000, theme: 'system', collections: [
+  // ?consented opens a page past the welcome screen, as a later visit would.
+  const data = { schema: 3, rev: 1, lastSignal: now - 4000, theme: 'system', ...(new URLSearchParams(location.search).has('consented') ? { consentedAt: now } : {}), collections: [
     { id: 'all', name: getMessage('allCollection'), all: true, ids: [], seen: [], readAt: now - 66 * 60e3 },
     { id: 'club', name: 'Game Club', emoji: '⭐', all: false, ids: ['gen', 'anu', 'bld'], seen: ['gen', 'anu', 'bld', 'mem', 'eve'], readAt: now - 66 * 60e3 },
   ] };

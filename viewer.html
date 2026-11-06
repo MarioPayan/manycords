@@ -45,6 +45,7 @@
     .menu { position: absolute; left: 12px; right: 12px; top: 54px; z-index: 10; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 32px -16px rgba(0,0,0,.35);
       padding: 6px; display: grid; gap: 2px; font-weight: 400; font-size: 14px; }
     .menu label { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 6px 8px; color: var(--soft); }
+    .menu input[type="checkbox"] { accent-color: var(--signal); width: 16px; height: 16px; margin: 0; }
     .menu select { background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; max-width: 100%; }
     .menu button { text-align: left; padding: 7px 8px; border-radius: 8px; color: var(--soft); }
     .menu button:hover { background: var(--hover); color: var(--ink); }
@@ -107,6 +108,16 @@
     .chipf .fav { width: 16px; height: 16px; font-size: 6px; }
     .chipf button { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: var(--faint); flex: none; }
     .chipf button:hover { background: var(--hover); color: var(--ink); }
+    /* "Only mine": a toggle chip; the same accent bar marks messages that concern the user. */
+    .minechip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); color: var(--soft); font-weight: 500; }
+    .minechip::before, .entry.mine .who::before { content: ""; display: inline-block; width: 3px; height: 12px; border-radius: 2px; background: var(--signal); }
+    .minechip:hover { color: var(--ink); border-color: var(--faint); }
+    .minechip[aria-pressed="true"] { background: color-mix(in srgb, var(--signal) 12%, transparent); border-color: var(--signal); color: var(--signal); }
+    .entry.mine .who::before { margin-right: 6px; vertical-align: -1px; }
+    .kwrow { display: flex; gap: 8px; }
+    .kwrow .inp { height: 38px; font-size: 14px; font-weight: 400; }
+    .kwlist { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 20px; }
+    .kwlist p { margin: 0; }
 
     .scroll { flex: 1; overflow-y: auto; scrollbar-width: thin; }
     .river { position: relative; max-width: 860px; padding: 12px 28px 64px 0; margin-left: 14px; }
@@ -269,6 +280,9 @@
           <label><span data-i18n="theme"></span> <select id="theme"><option value="system" data-i18n="systemTheme"></option><option value="light" data-i18n="lightTheme"></option><option value="dark" data-i18n="darkTheme"></option></select></label>
           <label><span data-i18n="retention"></span> <select id="retention"><option value="7" data-i18n="retention7"></option><option value="14" data-i18n="retention14"></option><option value="30" data-i18n="retention30"></option><option value="0" data-i18n="retentionForever"></option></select></label>
           <label><span data-i18n="newArrive"></span> <select id="direction"><option value="top" data-i18n="directionTop"></option><option value="bottom" data-i18n="directionBottom"></option></select></label>
+          <button id="keywords" data-i18n="keywords"></button>
+          <label><span data-i18n="notifyMe"></span> <input type="checkbox" id="notify"></label>
+          <label><span data-i18n="countEveryone"></span> <input type="checkbox" id="mine-everyone"></label>
           <button id="export-current" data-i18n="exportCollection"></button>
           <button id="export-all" data-i18n="exportEverything"></button>
           <button id="welcome" data-i18n="welcome"></button>

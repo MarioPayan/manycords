@@ -83,6 +83,7 @@ try {
   assert.ok(!JSON.stringify(stored).includes('private@example.org'), 'no other READY user data is stored');
   const notes = await worker.evaluate(() => chrome.notifications.getAll());
   assert.deepEqual(Object.keys(notes), ['mine:c2:102'], 'one notification for the live mention');
+  await viewer.locator('.entry.mine[data-id="102"]').waitFor();
   assert.deepEqual(errors, []);
   if (process.argv[2]) await viewer.screenshot({ path: resolve(process.argv[2]), fullPage: true });
   console.log('Chrome gateway → IndexedDB → viewer passed');

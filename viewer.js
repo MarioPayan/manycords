@@ -115,8 +115,8 @@ function gapCovered(gap) {
   const ids = Object.values(S.chans).filter((ch) => !NOT_LISTENABLE.includes(ch.type) && S.collections.some((c) => c.all || c.ids.includes(ch.id))).map((ch) => ch.id);
   return typeof isGapCovered === 'function' ? isGapCovered(gap, ids) : ids.length > 0 && ids.every((id) => gap.covered?.[id]);
 }
-// lastSignal advances on every leader gateway frame (heartbeat ACKs included), throttled to one per minute by hook.js,
-// so a quiet but healthy channel refreshes it every 60-100 s. Thresholds sit above that cadence.
+// lastSignal advances on every leader gateway frame (heartbeat ACKs included), throttled to one per 15 s by hook.js,
+// so a quiet but healthy channel still refreshes it on every heartbeat (~41 s). Thresholds sit above that cadence.
 const SIGNAL_WARN = 120, SIGNAL_OFF = 180;
 function chevron() {
   const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');

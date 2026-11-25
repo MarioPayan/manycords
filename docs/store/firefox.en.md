@@ -46,7 +46,7 @@ No remote executable code is loaded; scripts and fonts are bundled with the exte
 - Transmission: captured data is never sent to the developer or any third party. The only extension network requests are image loads from Discord’s CDN (cdn.discordapp.com, media.discordapp.net and Discord’s link-preview image proxy (images-ext-1.discordapp.net, images-ext-2.discordapp.net)) for avatars, server icons, thumbnails and link previews. These image requests reach Discord; captured messages are not uploaded.
 - Retention and deletion: configurable retention, 14 days by default; full captured-data deletion from the reader’s menu; uninstalling removes all stored data.
 - No analytics or extension accounts. No selling, advertising use, unrelated use or creditworthiness use of data. Data is used only for the single purpose above.
-- Privacy policy: publish docs/privacy.html on GitHub Pages and enter its actual public URL in the store’s privacy-policy field. Spanish translation: docs/privacy.es.html. Contact: CONTACT_EMAIL.
+- Privacy policy: publish docs/privacy.html on GitHub Pages and enter its actual public URL in the store’s privacy-policy field. Spanish translation: docs/privacy.es.html. Contact: the repository issues (https://github.com/MarioPayan/manycords/issues).
 
 Submission check: the policy and listing describe the retention and full-deletion behaviour required by the release brief. This checkout does not yet implement configurable retention, and its wipe action preserves collections and channel metadata. Resolve that mismatch before submission; do not certify the listed behaviour against the current build.
 
